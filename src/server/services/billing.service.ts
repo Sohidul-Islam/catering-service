@@ -1,5 +1,5 @@
 import { db } from '@/db';
-import { organizations, profiles, mealSlots, mealConfirmations, recurringPreferences, invoices } from '@/db/schema';
+import { organizations, profiles, mealSlots, mealConfirmations, recurringPreferences, invoices, billingSnapshots } from '@/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { resend } from '../lib/resend';
 
@@ -40,6 +40,12 @@ export class BillingService {
     let totalMealsCount = 0;
     let totalAmount = 0;
 
+    // Track quantity consumed per meal slot ID
+    const slotQuantities = new Map<string, number>();
+    for (const slot of slots) {
+      slotQuantities.set(slot.id, 0);
+    }
+
     const start = new Date(startDateStr);
     const end = new Date(endDateStr);
 
@@ -72,6 +78,9 @@ export class BillingService {
           if (isConfirmed) {
             totalMealsCount += quantity;
             totalAmount += parseFloat(slot.price) * quantity;
+
+            const currentQty = slotQuantities.get(slot.id) || 0;
+            slotQuantities.set(slot.id, currentQty + quantity);
           }
         }
       }
@@ -89,6 +98,27 @@ export class BillingService {
         status: 'draft',
       })
       .returning();
+
+    // 7. Save billing snapshots to DB
+    const snapshotsToInsert = [];
+    for (const slot of slots) {
+      const quantity = slotQuantities.get(slot.id) || 0;
+      if (quantity > 0) {
+        const unitPrice = parseFloat(slot.price);
+        snapshotsToInsert.push({
+          invoiceId: invoice.id,
+          mealSlotId: slot.id,
+          slotName: slot.name,
+          unitPrice: unitPrice.toFixed(2),
+          totalQuantity: quantity,
+          totalAmount: (unitPrice * quantity).toFixed(2),
+        });
+      }
+    }
+
+    if (snapshotsToInsert.length > 0) {
+      await db.insert(billingSnapshots).values(snapshotsToInsert);
+    }
 
     return invoice;
   }

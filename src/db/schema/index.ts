@@ -6,3 +6,5 @@ export * from './confirmations';
 export * from './invoices';
 export * from './logs';
 export * from './notifications';
+export * from './billing_snapshots';
+
