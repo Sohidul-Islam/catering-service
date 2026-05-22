@@ -1,0 +1,1025 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { trpc } from '@/utils/trpc';
+import { 
+  ChefHat, Calendar, Plus, Mail, Clock, Sparkles, ToggleLeft, UserCheck, Check, X 
+} from 'lucide-react';
+
+export default function UnifiedDashboard() {
+  const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'slots' | 'billing' | 'logs'>('overview');
+  
+  // Member Specific States
+  const [memberTab, setMemberTab] = useState<'rsvp' | 'recurring' | 'history'>('rsvp');
+  const [rsvpDate, setRsvpDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedPrefSlots, setSelectedPrefSlots] = useState<{ slotId: string; day: number; qty: number }[]>([]);
+
+  // Admin Specific States
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState<'org_admin' | 'org_member'>('org_member');
+  const [newMemberBehavior, setNewMemberBehavior] = useState<'recurring' | 'flexible'>('flexible');
+  const [showMemberModal, setShowMemberModal] = useState(false);
+
+  // New Slot States
+  const [slotName, setSlotName] = useState('');
+  const [slotStartTime, setSlotStartTime] = useState('08:00');
+  const [slotEndTime, setSlotEndTime] = useState('09:00');
+  const [slotDeadline, setSlotDeadline] = useState('22:00');
+  const [slotDaysAhead, setSlotDaysAhead] = useState(1);
+  const [slotPrice, setSlotPrice] = useState('10.00');
+  const [showSlotModal, setShowSlotModal] = useState(false);
+
+  // Billing period state
+  const [billStart, setBillStart] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d.toISOString().split('T')[0];
+  });
+  const [billEnd, setBillEnd] = useState(() => new Date().toISOString().split('T')[0]);
+
+  // Alert toast
+  const [notification, setNotification] = useState<string | null>(null);
+
+  // 1. Fetch organization details
+  const { data: org } = trpc.organization.getDetails.useQuery(undefined, {
+    retry: false,
+  });
+
+  // Resolve client user role and credentials
+  // If there's no DB user active (sandbox mode), we default to organization admin view
+  const userRole = org ? (org.billingEmail.includes('demo') ? 'org_member' : 'org_admin') : 'org_admin'; 
+  const mockOrg = { name: org?.name || 'Acme Corporate Sandbox', timezone: org?.timezone || 'UTC' };
+
+  // tRPC Queries and Mutations
+  const { data: members = [], refetch: refetchMembers } = trpc.organization.getMembers.useQuery(undefined, {
+    enabled: !!org && userRole === 'org_admin',
+  });
+
+  const { data: slots = [], refetch: refetchSlots } = trpc.organization.getSlots.useQuery(undefined, {
+    enabled: !!org,
+  });
+
+  const { data: dailyStats = [], refetch: refetchStats } = trpc.meal.getDailyStats.useQuery({ date: rsvpDate }, {
+    enabled: !!org && userRole === 'org_admin',
+  });
+
+  const { data: userConfirmations = [], refetch: refetchConfirmations } = trpc.meal.getConfirmations.useQuery({
+    startDate: rsvpDate,
+    endDate: rsvpDate,
+  }, {
+    enabled: !!org && userRole === 'org_member',
+  });
+
+  const { data: userPrefs = [], refetch: refetchUserPrefs } = trpc.meal.getRecurringPreferences.useQuery(undefined, {
+    enabled: !!org && userRole === 'org_member',
+  });
+
+  const { data: invoicesList = [], refetch: refetchInvoices } = trpc.billing.getInvoices.useQuery(undefined, {
+    enabled: !!org && userRole === 'org_admin',
+  });
+
+  const { data: adjustmentLogs = [] } = trpc.analytics.getAdjustmentLogs.useQuery(undefined, {
+    enabled: !!org && userRole === 'org_admin',
+  });
+
+  // Mutations
+  const addMemberMutation = trpc.organization.addMember.useMutation();
+  const toggleBehaviorMutation = trpc.organization.toggleMemberBehavior.useMutation();
+  const createSlotMutation = trpc.organization.createSlot.useMutation();
+  const confirmMealMutation = trpc.meal.confirmMeal.useMutation();
+  const adminOverrideMutation = trpc.meal.adminOverride.useMutation();
+  const savePrefsMutation = trpc.meal.saveRecurringPreferences.useMutation();
+  const generateInvoiceMutation = trpc.billing.generateInvoice.useMutation();
+  const sendInvoiceEmailMutation = trpc.billing.sendInvoiceEmail.useMutation();
+
+  // Populate user preferences checklist on load
+  useEffect(() => {
+    if (userPrefs.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedPrefSlots(
+        userPrefs.map(p => ({ slotId: p.mealSlotId, day: p.dayOfWeek, qty: p.quantity }))
+      );
+    }
+  }, [userPrefs]);
+
+  const handleAddMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const mockUid = `usr-${Date.now().toString().slice(-6)}`;
+      await addMemberMutation.mutateAsync({
+        id: mockUid,
+        email: newMemberEmail,
+        fullName: newMemberName,
+        role: newMemberRole,
+        mealBehaviorType: newMemberBehavior,
+      });
+      setNewMemberEmail('');
+      setNewMemberName('');
+      setShowMemberModal(false);
+      setNotification(`🎉 Member added successfully!`);
+      refetchMembers();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
+  const handleToggleBehavior = async (memberId: string, currentBehavior: 'recurring' | 'flexible') => {
+    try {
+      const nextBehavior = currentBehavior === 'recurring' ? 'flexible' : 'recurring';
+      await toggleBehaviorMutation.mutateAsync({
+        memberId,
+        mealBehaviorType: nextBehavior,
+      });
+      setNotification(`Updated member configuration.`);
+      refetchMembers();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
+  const handleCreateSlot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await createSlotMutation.mutateAsync({
+        name: slotName,
+        startTime: slotStartTime,
+        endTime: slotEndTime,
+        confirmationDeadline: slotDeadline,
+        deadlineDaysAhead: slotDaysAhead,
+        price: slotPrice,
+      });
+      setSlotName('');
+      setShowSlotModal(false);
+      setNotification(`🎉 Meal slot ${slotName} created!`);
+      refetchSlots();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
+  const handleMemberConfirm = async (slotId: string, status: 'confirmed' | 'skipped') => {
+    try {
+      await confirmMealMutation.mutateAsync({
+        mealSlotId: slotId,
+        date: rsvpDate,
+        status,
+        quantity: 1,
+      });
+      setNotification(`Meal RSVP updated to ${status}.`);
+      refetchConfirmations();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Cutoff Alert: ${error.message}`);
+    }
+  };
+
+  const handleAdminOverride = async (memberId: string, slotId: string, status: 'confirmed' | 'skipped') => {
+    try {
+      await adminOverrideMutation.mutateAsync({
+        memberId,
+        mealSlotId: slotId,
+        date: rsvpDate,
+        status,
+        quantity: 1,
+        reason: 'Administrative override adjustment',
+      });
+      setNotification(`RSVP status overridden by Admin.`);
+      refetchStats();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
+  const handleSavePreferences = async () => {
+    try {
+      await savePrefsMutation.mutateAsync(
+        selectedPrefSlots.map(p => ({ mealSlotId: p.slotId, dayOfWeek: p.day, quantity: p.qty }))
+      );
+      setNotification(`🎉 Recurring meal template saved successfully.`);
+      refetchUserPrefs();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
+  const handleGenerateInvoice = async () => {
+    try {
+      await generateInvoiceMutation.mutateAsync({
+        startDate: billStart,
+        endDate: billEnd,
+      });
+      setNotification(`🎉 Invoice draft compiled!`);
+      refetchInvoices();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
+  const handleSendInvoiceEmail = async (invId: string) => {
+    try {
+      await sendInvoiceEmailMutation.mutateAsync({ invoiceId: invId });
+      setNotification(`📩 Invoice sent to organization billing email!`);
+      refetchInvoices();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
+  const togglePrefSlot = (slotId: string, day: number) => {
+    const existingIndex = selectedPrefSlots.findIndex(p => p.slotId === slotId && p.day === day);
+    if (existingIndex > -1) {
+      setSelectedPrefSlots(selectedPrefSlots.filter((_, idx) => idx !== existingIndex));
+    } else {
+      setSelectedPrefSlots([...selectedPrefSlots, { slotId, day, qty: 1 }]);
+    }
+  };
+
+  // MOCK DATA FOR LOCAL SANDBOX WORKTHROUGHS
+  const sandboxStats = [
+    { label: 'Active Slots Configured', val: slots.length || 3 },
+    { label: 'Registered Employees', val: members.length || 48 },
+    { label: 'Daily Meals Confirmed', val: dailyStats.reduce((acc, s) => acc + s.confirmedCount, 0) || 32 },
+    { label: 'Invoice Subtotals', val: `$${invoicesList.reduce((acc, inv) => acc + parseFloat(inv.totalAmount), 0).toFixed(2)}` },
+  ];
+
+  return (
+    <div className="flex-1 min-h-screen bg-background flex flex-col font-sans">
+      {/* Toast Notification */}
+      {notification && (
+        <div className="fixed bottom-6 right-6 z-50 p-4 rounded-xl border border-accent/20 bg-card shadow-2xl flex items-center justify-between gap-5 transition-all max-w-sm">
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="h-5 w-5 text-accent animate-spin" />
+            <span className="text-xs font-semibold text-foreground">{notification}</span>
+          </div>
+          <button onClick={() => setNotification(null)} className="text-xs hover:underline text-muted-foreground">Dismiss</button>
+        </div>
+      )}
+
+      {/* Corporate Dashboard Navigation */}
+      <header className="sticky top-0 z-40 w-full glassmorphism border-b border-border/40">
+        <div className="max-w-7xl mx-auto px-8 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-gradient-to-tr from-primary to-accent text-white shadow-lg flex items-center">
+              <ChefHat className="h-6 w-6" />
+            </div>
+            <div>
+              <span className="font-serif text-xl font-bold text-foreground block">
+                {mockOrg.name}
+              </span>
+              <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
+                {userRole === 'org_admin' ? 'Organization Admin Console' : 'Member RSVP Space'}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-6">
+            <Link href="/" className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+              Return Home
+            </Link>
+            <span className="h-5 w-px bg-border/40" />
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider font-mono">
+                {mockOrg.timezone} Time
+              </span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Panel */}
+      <main className="max-w-7xl mx-auto px-8 py-10 w-full flex-grow space-y-8">
+        
+        {/* ======================================================== */}
+        {/* 1. ORGANIZATION ADMIN PORTAL */}
+        {/* ======================================================== */}
+        {userRole === 'org_admin' && (
+          <>
+            {/* Quick Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              {sandboxStats.map((stat, i) => (
+                <div key={i} className="glassmorphism p-6 rounded-2xl">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">
+                    {stat.label}
+                  </span>
+                  <span className="text-2xl font-serif font-bold text-foreground">
+                    {stat.val}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Admin Tabs */}
+            <div className="flex gap-4 border-b border-border/40 pb-4">
+              {([
+                { id: 'overview', name: 'Meal RSVP overrides' },
+                { id: 'members', name: 'Employees behavior' },
+                { id: 'slots', name: 'Meal slots timeline' },
+                { id: 'billing', name: 'Monthly invoices' },
+                { id: 'logs', name: 'Audit adjustment logs' },
+              ] as const).map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTab(t.id)}
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    activeTab === t.id
+                      ? 'bg-secondary text-foreground border border-border'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+
+            {/* TAB: Overrides & Stats */}
+            {activeTab === 'overview' && (
+              <div className="space-y-6">
+                <div className="glassmorphism rounded-2xl p-6 border border-border/40 space-y-4">
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="font-serif text-lg font-bold">Daily RSVP Board</h3>
+                      <p className="text-xs text-muted-foreground">Adjust RSVPs and monitor totals for operational counts.</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Clock className="h-4 w-4 text-accent" />
+                      <input
+                        type="date"
+                        value={rsvpDate}
+                        onChange={(e) => setRsvpDate(e.target.value)}
+                        className="px-3 py-1.5 rounded-lg bg-secondary border border-border focus:border-primary focus:outline-none text-xs text-foreground font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {dailyStats.map((stat) => (
+                      <div key={stat.slotId} className="p-4 rounded-xl bg-secondary/10 border border-border/30 space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-accent uppercase tracking-wider">{stat.slotName}</span>
+                          <span className="text-[10px] text-muted-foreground font-mono">{stat.time}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className="bg-emerald-500/10 p-2 rounded">
+                            <span className="text-[10px] text-emerald-400 block font-semibold">Confirmed</span>
+                            <span className="text-sm font-bold">{stat.confirmedCount}</span>
+                          </div>
+                          <div className="bg-rose-500/10 p-2 rounded">
+                            <span className="text-[10px] text-rose-400 block font-semibold">Skipped</span>
+                            <span className="text-sm font-bold">{stat.skippedCount}</span>
+                          </div>
+                          <div className="bg-zinc-500/10 p-2 rounded">
+                            <span className="text-[10px] text-zinc-400 block font-semibold">Pending</span>
+                            <span className="text-sm font-bold">{stat.pendingCount}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Overrides Table */}
+                <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
+                  <div className="px-8 py-5 border-b border-border/40 bg-card/10 flex items-center justify-between">
+                    <span className="font-serif text-sm font-bold">Override Member Statuses ({rsvpDate})</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
+                        <tr>
+                          <th className="px-8 py-4">Employee</th>
+                          <th className="px-6 py-4">Behavior</th>
+                          {slots.map((s) => (
+                            <th key={s.id} className="px-6 py-4">{s.name} RSVP</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/40">
+                        {members.length === 0 ? (
+                          <tr>
+                            <td colSpan={2 + slots.length} className="py-10 text-center text-muted-foreground">
+                              No employees added to override confirmations.
+                            </td>
+                          </tr>
+                        ) : (
+                          members.map((m) => (
+                            <tr key={m.id} className="hover:bg-secondary/5 transition-colors">
+                              <td className="px-8 py-4 font-semibold">{m.fullName || m.email}</td>
+                              <td className="px-6 py-4">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  m.mealBehaviorType === 'recurring' ? 'bg-indigo-500/15 text-indigo-400' : 'bg-amber-500/15 text-amber-400'
+                                }`}>
+                                  {m.mealBehaviorType}
+                                </span>
+                              </td>
+                              {slots.map((s) => (
+                                <td key={s.id} className="px-6 py-4">
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => handleAdminOverride(m.id, s.id, 'confirmed')}
+                                      className="p-1.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 cursor-pointer"
+                                      title="Override Confirm"
+                                    >
+                                      <Check className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleAdminOverride(m.id, s.id, 'skipped')}
+                                      className="p-1.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 cursor-pointer"
+                                      title="Override Skip"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </td>
+                              ))}
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: Members */}
+            {activeTab === 'members' && (
+              <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
+                <div className="px-8 py-5 border-b border-border/40 bg-card/10 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-serif text-sm font-bold">Organization Employees</h3>
+                    <p className="text-[10px] text-muted-foreground">Switch behavior templates between Recurring and Flexible.</p>
+                  </div>
+                  <button
+                    onClick={() => setShowMemberModal(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4" /> Add Employee
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
+                      <tr>
+                        <th className="px-8 py-4">Full Name / Email</th>
+                        <th className="px-6 py-4">Current Behavior Type</th>
+                        <th className="px-6 py-4">Access Role</th>
+                        <th className="px-8 py-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                      {members.map((m) => (
+                        <tr key={m.id} className="hover:bg-secondary/5 transition-colors">
+                          <td className="px-8 py-4">
+                            <p className="font-bold">{m.fullName || 'No Name Provided'}</p>
+                            <p className="text-muted-foreground text-[10px]">{m.email}</p>
+                          </td>
+                          <td className="px-6 py-4 font-mono text-[10px] font-bold">
+                            <span className={m.mealBehaviorType === 'recurring' ? 'text-indigo-400' : 'text-amber-400'}>
+                              {m.mealBehaviorType.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 uppercase font-bold text-[10px]">{m.role}</td>
+                          <td className="px-8 py-4 text-right">
+                            <button
+                              onClick={() => handleToggleBehavior(m.id, m.mealBehaviorType)}
+                              className="text-xs font-bold text-accent hover:underline flex items-center gap-1 ml-auto cursor-pointer"
+                            >
+                              <ToggleLeft className="h-3.5 w-3.5" /> Toggle Behavior
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: Slots configuration */}
+            {activeTab === 'slots' && (
+              <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
+                <div className="px-8 py-5 border-b border-border/40 bg-card/10 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-serif text-sm font-bold">Operating Meal Slots</h3>
+                    <p className="text-[10px] text-muted-foreground">Operational windows, prices, and confirmations cutoff guidelines.</p>
+                  </div>
+                  <button
+                    onClick={() => setShowSlotModal(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4" /> Add Slot
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
+                      <tr>
+                        <th className="px-8 py-4">Slot Name</th>
+                        <th className="px-6 py-4">Timeframe</th>
+                        <th className="px-6 py-4">Cutoff Rule</th>
+                        <th className="px-6 py-4">Unit Price</th>
+                        <th className="px-8 py-4 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                      {slots.map((s) => (
+                        <tr key={s.id} className="hover:bg-secondary/5 transition-colors">
+                          <td className="px-8 py-4 font-bold text-foreground">{s.name}</td>
+                          <td className="px-6 py-4 text-muted-foreground font-mono">{s.startTime} - {s.endTime}</td>
+                          <td className="px-6 py-4">
+                            {s.confirmationDeadline} ({s.deadlineDaysAhead === 0 ? 'Same Day' : `${s.deadlineDaysAhead} Day Before`})
+                          </td>
+                          <td className="px-6 py-4 font-bold text-accent">${s.price}</td>
+                          <td className="px-8 py-4 text-right">
+                            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-bold uppercase">
+                              Active
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: Billing & Invoicing */}
+            {activeTab === 'billing' && (
+              <div className="space-y-6">
+                <div className="glassmorphism p-6 rounded-2xl border border-border/40 space-y-4">
+                  <h3 className="font-serif text-sm font-bold">Compile Monthly Invoices</h3>
+                  <div className="flex flex-col md:flex-row items-end gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Billing Period Start</label>
+                      <input
+                        type="date"
+                        value={billStart}
+                        onChange={(e) => setBillStart(e.target.value)}
+                        className="px-3 py-2 rounded-xl bg-secondary border border-border text-xs text-foreground font-mono focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Billing Period End</label>
+                      <input
+                        type="date"
+                        value={billEnd}
+                        onChange={(e) => setBillEnd(e.target.value)}
+                        className="px-3 py-2 rounded-xl bg-secondary border border-border text-xs text-foreground font-mono focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={handleGenerateInvoice}
+                      className="px-5 py-2.5 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
+                    >
+                      Generate Monthly Bill
+                    </button>
+                  </div>
+                </div>
+
+                <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
+                  <div className="px-8 py-5 border-b border-border/40 bg-card/10">
+                    <span className="font-serif text-sm font-bold">Billing Records</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
+                        <tr>
+                          <th className="px-8 py-4">Billing Range</th>
+                          <th className="px-6 py-4">Total Meals</th>
+                          <th className="px-6 py-4">Billing Amount</th>
+                          <th className="px-6 py-4">Invoice Status</th>
+                          <th className="px-8 py-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/40">
+                        {invoicesList.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-10 text-center text-muted-foreground">
+                              No invoice records compiled yet. Adjust ranges above.
+                            </td>
+                          </tr>
+                        ) : (
+                          invoicesList.map((inv) => (
+                            <tr key={inv.id} className="hover:bg-secondary/5 transition-colors">
+                              <td className="px-8 py-4 font-mono font-semibold">
+                                {inv.billingPeriodStart} to {inv.billingPeriodEnd}
+                              </td>
+                              <td className="px-6 py-4">{inv.totalMealsCount} meals</td>
+                              <td className="px-6 py-4 font-bold text-accent">${inv.totalAmount}</td>
+                              <td className="px-6 py-4 uppercase">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  inv.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
+                                }`}>
+                                  {inv.status}
+                                </span>
+                              </td>
+                              <td className="px-8 py-4 text-right">
+                                <button
+                                  onClick={() => handleSendInvoiceEmail(inv.id)}
+                                  className="text-xs font-bold text-accent hover:underline flex items-center gap-1 ml-auto cursor-pointer"
+                                >
+                                  <Mail className="h-3.5 w-3.5" /> Email Invoice
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: Logs */}
+            {activeTab === 'logs' && (
+              <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
+                <div className="px-8 py-5 border-b border-border/40 bg-card/10">
+                  <h3 className="font-serif text-sm font-bold">Audit Override Logs</h3>
+                  <p className="text-[10px] text-muted-foreground">Compliance audit tracking of manual overrides completed by organization admins.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
+                      <tr>
+                        <th className="px-8 py-4">Logged At</th>
+                        <th className="px-6 py-4">Target Date</th>
+                        <th className="px-6 py-4">Action Done</th>
+                        <th className="px-8 py-4">Audit Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                      {adjustmentLogs.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-10 text-center text-muted-foreground">
+                            No manual override events logged.
+                          </td>
+                        </tr>
+                      ) : (
+                        adjustmentLogs.map((log) => (
+                          <tr key={log.id} className="hover:bg-secondary/5 transition-colors">
+                            <td className="px-8 py-4 text-muted-foreground font-mono">
+                              {new Date(log.createdAt).toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4 font-mono font-semibold">{log.date}</td>
+                            <td className="px-6 py-4 font-bold uppercase text-[10px] text-accent">
+                              {log.actionType.replace('_', ' ')}
+                            </td>
+                            <td className="px-8 py-4 text-muted-foreground">{log.details}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ======================================================== */}
+        {/* 2. ORGANIZATION MEMBER SPACE */}
+        {/* ======================================================== */}
+        {userRole === 'org_member' && (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            
+            {/* Sidebar navigation */}
+            <div className="lg:col-span-1 glassmorphism p-6 rounded-2xl space-y-4 h-fit">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">Member Workspace</span>
+              <div className="flex flex-col gap-2">
+                {([
+                  { id: 'rsvp', name: 'Daily RSVP Calendar' },
+                  { id: 'recurring', name: 'Weekly Preferences' },
+                ] as const).map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setMemberTab(t.id)}
+                    className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                      memberTab === t.id
+                        ? 'bg-secondary text-foreground border border-border'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Workspace Area */}
+            <div className="lg:col-span-3 space-y-6">
+              
+              {/* TAB: RSVP */}
+              {memberTab === 'rsvp' && (
+                <div className="glassmorphism p-8 rounded-2xl border border-border/40 space-y-6">
+                  <div className="flex justify-between items-center pb-4 border-b border-border/40">
+                    <div>
+                      <h3 className="font-serif text-lg font-bold flex items-center gap-2">
+                        <Calendar className="h-5 w-5 text-primary" /> Daily Meal RSVP
+                      </h3>
+                      <p className="text-xs text-muted-foreground">Select your participation status below. Cutoff rules apply.</p>
+                    </div>
+                    <input
+                      type="date"
+                      value={rsvpDate}
+                      onChange={(e) => setRsvpDate(e.target.value)}
+                      className="px-3 py-2 rounded-xl bg-secondary border border-border focus:outline-none text-xs text-foreground font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-4">
+                    {userConfirmations.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No active meal slots configured for today.</p>
+                    ) : (
+                      userConfirmations.map((conf) => (
+                        <div key={conf.slot.id} className="p-5 rounded-xl bg-secondary/10 border border-border/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-accent uppercase tracking-wider">{conf.slot.name}</span>
+                              <span className="text-[10px] text-muted-foreground font-mono">{conf.slot.startTime} - {conf.slot.endTime}</span>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground block mt-1">
+                              * Cutoff: {conf.slot.confirmationDeadline} ({conf.slot.deadlineDaysAhead === 0 ? 'Same Day' : `${conf.slot.deadlineDaysAhead} Day Before`})
+                            </span>
+                            <div className="mt-3">
+                              <span className="text-xs text-muted-foreground">Status: </span>
+                              <span className={`text-xs font-bold capitalize ${
+                                conf.status === 'confirmed' ? 'text-emerald-400' : conf.status === 'skipped' ? 'text-rose-400' : 'text-zinc-400'
+                              }`}>
+                                {conf.status}
+                              </span>
+                              {conf.isOverridden && (
+                                <span className="text-[9px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded ml-2 font-bold uppercase">
+                                  Overridden by Admin
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              disabled={conf.isDeadlinePassed}
+                              onClick={() => handleMemberConfirm(conf.slot.id, 'confirmed')}
+                              className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 disabled:opacity-40 transition-all cursor-pointer"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              disabled={conf.isDeadlinePassed}
+                              onClick={() => handleMemberConfirm(conf.slot.id, 'skipped')}
+                              className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 disabled:opacity-40 transition-all cursor-pointer"
+                            >
+                              Skip
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: Recurring preferences */}
+              {memberTab === 'recurring' && (
+                <div className="glassmorphism p-8 rounded-2xl border border-border/40 space-y-6">
+                  <div>
+                    <h3 className="font-serif text-lg font-bold flex items-center gap-2">
+                      <UserCheck className="h-5 w-5 text-accent" /> Weekly Recurring Meal Preferences
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Configure your weekly schedule. Recurring members are automatically confirmed for selected slots.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {slots.map((slot) => (
+                      <div key={slot.id} className="p-4 rounded-xl bg-secondary/15 border border-border/20 space-y-3">
+                        <p className="text-xs font-bold uppercase tracking-wider text-accent">{slot.name} Preferences</p>
+                        <div className="grid grid-cols-5 gap-2">
+                          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((dayName, idx) => {
+                            const dayNum = idx + 1; // 1 = Monday, etc.
+                            const isChecked = selectedPrefSlots.some(p => p.slotId === slot.id && p.day === dayNum);
+                            return (
+                              <button
+                                key={dayNum}
+                                onClick={() => togglePrefSlot(slot.id, dayNum)}
+                                className={`p-2.5 rounded-lg border text-xs font-semibold text-center transition-all cursor-pointer ${
+                                  isChecked
+                                    ? 'bg-primary/20 border-primary text-foreground'
+                                    : 'border-border/40 bg-secondary/30 text-muted-foreground hover:bg-secondary'
+                                }`}
+                              >
+                                {dayName}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleSavePreferences}
+                    className="px-6 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-xl shadow-primary/25 transition-all cursor-pointer"
+                  >
+                    Save Preferences Template
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* Member Creation Dialog Modal */}
+      {showMemberModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glassmorphism max-w-md w-full p-8 rounded-2xl border border-accent/20 relative shadow-2xl">
+            <h3 className="font-serif text-xl font-bold mb-4">Add Organization Member</h3>
+            <form onSubmit={handleAddMember} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Employee Full Name"
+                  value={newMemberName}
+                  onChange={(e) => setNewMemberName(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="employee@corporate.com"
+                  value={newMemberEmail}
+                  onChange={(e) => setNewMemberEmail(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Portal Role</label>
+                  <select
+                    value={newMemberRole}
+                    onChange={(e) => setNewMemberRole(e.target.value as 'org_admin' | 'org_member')}
+                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
+                  >
+                    <option value="org_member">Member (Employee)</option>
+                    <option value="org_admin">Admin (Catering Manager)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">RSVP Type</label>
+                  <select
+                    value={newMemberBehavior}
+                    onChange={(e) => setNewMemberBehavior(e.target.value as 'recurring' | 'flexible')}
+                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
+                  >
+                    <option value="flexible">Flexible (Manual RSVP)</option>
+                    <option value="recurring">Recurring (Auto-meals)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowMemberModal(false)}
+                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-secondary hover:bg-muted border border-border transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 transition-all"
+                >
+                  Add Employee
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Slot Creation Dialog Modal */}
+      {showSlotModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glassmorphism max-w-md w-full p-8 rounded-2xl border border-accent/20 relative shadow-2xl">
+            <h3 className="font-serif text-xl font-bold mb-4">Create Operating Meal Slot</h3>
+            <form onSubmit={handleCreateSlot} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Slot Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., Breakfast, Dinner"
+                  value={slotName}
+                  onChange={(e) => setSlotName(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Start Time</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g., 08:00"
+                    value={slotStartTime}
+                    onChange={(e) => setSlotStartTime(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">End Time</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g., 09:30"
+                    value={slotEndTime}
+                    onChange={(e) => setSlotEndTime(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Cutoff Time</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g., 22:00"
+                    value={slotDeadline}
+                    onChange={(e) => setSlotDeadline(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Days Ahead</label>
+                  <select
+                    value={slotDaysAhead}
+                    onChange={(e) => setSlotDaysAhead(parseInt(e.target.value))}
+                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
+                  >
+                    <option value="0">Same Day (0 days ahead)</option>
+                    <option value="1">Previous Day (1 day ahead)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Meal Slot Price ($)</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., 12.50"
+                  value={slotPrice}
+                  onChange={(e) => setSlotPrice(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
+                />
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowSlotModal(false)}
+                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-secondary hover:bg-muted border border-border transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 transition-all"
+                >
+                  Create Slot
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Footer */}
+      <footer className="border-t border-border/40 py-8 text-center text-xs text-muted-foreground bg-secondary/5 mt-auto">
+        LuxeCater Corporate Management Suite. Live connection active.
+      </footer>
+    </div>
+  );
+}
