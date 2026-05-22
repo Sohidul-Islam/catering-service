@@ -1,6 +1,7 @@
 import './polyfill-websocket';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
 // Parse .env manually
@@ -43,7 +44,7 @@ async function seed() {
   const { db } = await import('./index');
   const { organizations } = await import('./schema/organizations');
   const { profiles } = await import('./schema/users');
-  const { eq } = await import('drizzle-orm');
+  const { eq, sql } = await import('drizzle-orm');
 
   console.log('--- SEEDING DEMO DATA ---');
 
@@ -90,67 +91,103 @@ async function seed() {
     console.log(`\nProcessing user: ${user.email}...`);
     let supabaseUid: string | null = null;
 
-    if (hasServiceRoleKey) {
-      console.log('Using Supabase admin client to create/confirm user...');
-      const adminClient = createClient(supabaseUrl!, serviceRoleKey!);
-      
-      // Try to create user
-      const { data, error } = await adminClient.auth.admin.createUser({
-        email: user.email,
-        password: user.password,
-        email_confirm: true,
-      });
-
-      if (error) {
-        if (error.message.includes('already exists') || error.message.includes('already registered')) {
-          console.log('User already exists in Supabase. Retrieving UID via authentication...');
-          const client = createClient(supabaseUrl!, supabaseAnonKey!);
-          const { data: signInData, error: signInError } = await client.auth.signInWithPassword({
-            email: user.email,
-            password: user.password,
-          });
-          if (signInError) {
-            console.error(`Failed to authenticate existing user: ${signInError.message}`);
-          } else if (signInData.user) {
-            supabaseUid = signInData.user.id;
-          }
+    // Check if user already exists in auth.users database
+    try {
+      const authUserResult = await db.execute(sql`SELECT id FROM auth.users WHERE email = ${user.email}`);
+      if (authUserResult.length > 0) {
+        supabaseUid = authUserResult[0].id as string;
+        console.log(`Found existing auth.users record: ${user.email} (UID: ${supabaseUid})`);
+        
+        // Confirm the email in case it's unconfirmed (omitted confirmed_at column)
+        await db.execute(sql`
+          UPDATE auth.users
+          SET email_confirmed_at = NOW(),
+              raw_user_meta_data = raw_user_meta_data || '{"email_verified": true}'::jsonb,
+              updated_at = NOW()
+          WHERE id = ${supabaseUid}
+        `);
+        
+        // Check if identity exists
+        const identityResult = await db.execute(sql`SELECT id FROM auth.identities WHERE user_id = ${supabaseUid}`);
+        if (identityResult.length > 0) {
+          await db.execute(sql`
+            UPDATE auth.identities
+            SET identity_data = identity_data || '{"email_verified": true}'::jsonb,
+                updated_at = NOW()
+            WHERE user_id = ${supabaseUid}
+          `);
         } else {
-          console.error(`Failed to create user via admin client: ${error.message}`);
+          // If for some reason identity doesn't exist, create it (omitted email column)
+          const identityId = crypto.randomUUID();
+          await db.execute(sql`
+            INSERT INTO auth.identities (
+              id, user_id, identity_data, provider, provider_id,
+              last_sign_in_at, created_at, updated_at
+            ) VALUES (
+              ${identityId},
+              ${supabaseUid},
+              ${JSON.stringify({ sub: supabaseUid, email: user.email, email_verified: true, phone_verified: false })}::jsonb,
+              'email',
+              ${supabaseUid},
+              NOW(),
+              NOW(),
+              NOW()
+            )
+          `);
         }
-      } else if (data.user) {
-        supabaseUid = data.user.id;
-        console.log(`Successfully created user in Supabase (UID: ${supabaseUid})`);
-      }
-    } else {
-      console.log('Service role key not found/placeholder. Using public client...');
-      const client = createClient(supabaseUrl!, supabaseAnonKey!);
-      
-      console.log('Attempting sign-in first...');
-      const { data: signInData, error: signInError } = await client.auth.signInWithPassword({
-        email: user.email,
-        password: user.password,
-      });
-
-      if (signInData && signInData.user) {
-        supabaseUid = signInData.user.id;
-        console.log(`User already exists and authenticated successfully (UID: ${supabaseUid})`);
+        console.log(`Confirmed email for user: ${user.email}`);
       } else {
-        console.log(`Sign-in did not succeed: ${signInError?.message || 'Unknown'}. Attempting public sign-up...`);
-        const { data: signUpData, error: signUpError } = await client.auth.signUp({
-          email: user.email,
-          password: user.password,
-        });
+        // If they don't exist, we create them directly in auth.users and auth.identities
+        supabaseUid = crypto.randomUUID();
+        console.log(`Creating new user in auth.users: ${user.email} (UID: ${supabaseUid})`);
 
-        if (signUpError) {
-          console.error(`Public signup failed: ${signUpError.message}`);
-        } else if (signUpData && signUpData.user) {
-          supabaseUid = signUpData.user.id;
-          console.log(`Signed up user in Supabase (UID: ${supabaseUid})`);
-          console.log(`WARNING: If email confirmation is enabled in your Supabase dashboard, check your inbox or disable it in Supabase Auth settings to log in.`);
-        } else {
-          console.log('Public signup returned no user and no error.');
-        }
+        // Standard hash for 'Password123'
+        const passwordHash = '$2a$10$ob4HB99ZiolMoJPUecLumupSLzQF/mo7pzCqilRsRLmRduhCrIaQ6';
+
+        // Omitted generated column confirmed_at
+        await db.execute(sql`
+          INSERT INTO auth.users (
+            instance_id, id, aud, role, email, encrypted_password,
+            email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+            is_sso_user, is_anonymous, created_at, updated_at
+          ) VALUES (
+            '00000000-0000-0000-0000-000000000000',
+            ${supabaseUid},
+            'authenticated',
+            'authenticated',
+            ${user.email},
+            ${passwordHash},
+            NOW(),
+            '{"provider": "email", "providers": ["email"]}'::jsonb,
+            ${JSON.stringify({ sub: supabaseUid, email: user.email, email_verified: true, phone_verified: false })}::jsonb,
+            false,
+            false,
+            NOW(),
+            NOW()
+          )
+        `);
+
+        // Omitted generated column email
+        const identityId = crypto.randomUUID();
+        await db.execute(sql`
+          INSERT INTO auth.identities (
+            id, user_id, identity_data, provider, provider_id,
+            last_sign_in_at, created_at, updated_at
+          ) VALUES (
+            ${identityId},
+            ${supabaseUid},
+            ${JSON.stringify({ sub: supabaseUid, email: user.email, email_verified: true, phone_verified: false })}::jsonb,
+            'email',
+            ${supabaseUid},
+            NOW(),
+            NOW(),
+            NOW()
+          )
+        `);
+        console.log(`Successfully created auth and identity records for: ${user.email}`);
       }
+    } catch (error) {
+      console.error(`Error processing auth record for ${user.email}:`, error);
     }
 
     if (!supabaseUid) {
@@ -160,14 +197,30 @@ async function seed() {
 
     // 2. Create profile in database
     try {
-      const existingProfiles = await db.select().from(profiles).where(eq(profiles.id, supabaseUid));
-      if (existingProfiles.length > 0) {
-        await db.update(profiles).set({
-          role: user.role,
-          organizationId: user.organizationId,
-          fullName: user.fullName,
-        }).where(eq(profiles.id, supabaseUid));
-        console.log(`Updated database profile for ${user.email}.`);
+      // Check if profile exists with this email to avoid unique key constraint violation
+      const existingProfilesByEmail = await db.select().from(profiles).where(eq(profiles.email, user.email));
+      if (existingProfilesByEmail.length > 0) {
+        const oldProfile = existingProfilesByEmail[0];
+        if (oldProfile.id !== supabaseUid) {
+          console.log(`Deleting old profile with ID ${oldProfile.id} for email ${user.email} to resolve ID mismatch.`);
+          await db.delete(profiles).where(eq(profiles.id, oldProfile.id));
+          
+          await db.insert(profiles).values({
+            id: supabaseUid,
+            email: user.email,
+            fullName: user.fullName,
+            role: user.role,
+            organizationId: user.organizationId,
+          });
+          console.log(`Created database profile for ${user.email} with correct ID.`);
+        } else {
+          await db.update(profiles).set({
+            role: user.role,
+            organizationId: user.organizationId,
+            fullName: user.fullName,
+          }).where(eq(profiles.id, supabaseUid));
+          console.log(`Updated database profile for ${user.email}.`);
+        }
       } else {
         await db.insert(profiles).values({
           id: supabaseUid,
