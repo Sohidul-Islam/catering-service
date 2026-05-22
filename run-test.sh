@@ -4,8 +4,8 @@ if [ -f .env ]; then
   export $(grep -v '^#' .env | xargs)
 fi
 
-echo "=== PUSHING DATABASE SCHEMA ==="
-yes | ./node_modules/.bin/drizzle-kit push
+echo "=== RUNNING DATABASE MIGRATION ==="
+./node_modules/.bin/tsx src/db/run-db-migration.ts
 
 echo ""
 echo "=== RUNNING DATABASE CONNECTION TEST ==="
