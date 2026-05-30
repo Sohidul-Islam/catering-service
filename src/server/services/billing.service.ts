@@ -21,51 +21,81 @@ export class BillingService {
     // 3. Fetch all active meal slots
     const slots = await db.select().from(mealSlots).where(eq(mealSlots.organizationId, organizationId));
 
-    // 4. Fetch all explicit confirmations in the period
+    // 4. Fetch all explicit confirmations in the period FOR THIS ORGANIZATION ONLY (Security & Scale Fix)
     const confirmations = await db
-      .select()
+      .select({
+        id: mealConfirmations.id,
+        memberId: mealConfirmations.memberId,
+        mealSlotId: mealConfirmations.mealSlotId,
+        date: mealConfirmations.date,
+        status: mealConfirmations.status,
+        quantity: mealConfirmations.quantity,
+        price: mealConfirmations.price,
+        isOverridden: mealConfirmations.isOverridden,
+        overriddenById: mealConfirmations.overriddenById,
+        createdAt: mealConfirmations.createdAt,
+        updatedAt: mealConfirmations.updatedAt,
+      })
       .from(mealConfirmations)
+      .innerJoin(profiles, eq(mealConfirmations.memberId, profiles.id))
       .where(
         and(
+          eq(profiles.organizationId, organizationId),
           sql`${mealConfirmations.date} >= ${startDateStr}`,
           sql`${mealConfirmations.date} <= ${endDateStr}`
         )
       );
 
-    // 5. Fetch recurring preferences for all members
+    // 5. Fetch recurring preferences for all organization members (Security Fix: filter by organization)
     const recurringPrefs = await db
-      .select()
-      .from(recurringPreferences);
+      .select({
+        id: recurringPreferences.id,
+        memberId: recurringPreferences.memberId,
+        mealSlotId: recurringPreferences.mealSlotId,
+        dayOfWeek: recurringPreferences.dayOfWeek,
+        quantity: recurringPreferences.quantity,
+      })
+      .from(recurringPreferences)
+      .innerJoin(profiles, eq(recurringPreferences.memberId, profiles.id))
+      .where(eq(profiles.organizationId, organizationId));
 
     let totalMealsCount = 0;
     let totalAmount = 0;
 
     // Track quantity consumed per meal slot ID
     const slotQuantities = new Map<string, number>();
+    const slotPrices = new Map<string, number>(); // Track weighted/average or unit prices for snapshots
     for (const slot of slots) {
       slotQuantities.set(slot.id, 0);
+      slotPrices.set(slot.id, parseFloat(slot.price));
     }
-
-    const start = new Date(startDateStr);
-    const end = new Date(endDateStr);
 
     // For each member, iterate over each date in the period to compute confirmations
     for (const member of members) {
       const memberPrefs = recurringPrefs.filter((p) => p.memberId === member.id);
       const memberConfirmations = confirmations.filter((c) => c.memberId === member.id);
 
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().split('T')[0];
-        const dayOfWeek = d.getDay();
+      // Timezone-safe date looping using UTC boundaries
+      let current = new Date(startDateStr + 'T00:00:00Z');
+      const last = new Date(endDateStr + 'T00:00:00Z');
+
+      while (current <= last) {
+        const dateStr = current.toISOString().split('T')[0];
+        const dayOfWeek = current.getUTCDay();
 
         for (const slot of slots) {
           const explicitConf = memberConfirmations.find((c) => c.mealSlotId === slot.id && c.date === dateStr);
           let isConfirmed = false;
           let quantity = 1;
+          let activePrice = parseFloat(slot.price);
 
           if (explicitConf) {
             isConfirmed = explicitConf.status === 'confirmed';
             quantity = explicitConf.quantity;
+            // Use historical pricing snapshot if available, else fallback to current slot price
+            if (explicitConf.price) {
+              activePrice = parseFloat(explicitConf.price);
+            }
           } else if (member.mealBehaviorType === 'recurring') {
             // Check recurring pref default
             const pref = memberPrefs.find((p) => p.mealSlotId === slot.id && p.dayOfWeek === dayOfWeek);
@@ -77,12 +107,17 @@ export class BillingService {
 
           if (isConfirmed) {
             totalMealsCount += quantity;
-            totalAmount += parseFloat(slot.price) * quantity;
+            totalAmount += activePrice * quantity;
 
             const currentQty = slotQuantities.get(slot.id) || 0;
             slotQuantities.set(slot.id, currentQty + quantity);
+            
+            // Lock in the active price for snapshots (if multiple exist, it takes the last active price)
+            slotPrices.set(slot.id, activePrice);
           }
         }
+
+        current.setUTCDate(current.getUTCDate() + 1);
       }
     }
 
@@ -104,7 +139,7 @@ export class BillingService {
     for (const slot of slots) {
       const quantity = slotQuantities.get(slot.id) || 0;
       if (quantity > 0) {
-        const unitPrice = parseFloat(slot.price);
+        const unitPrice = slotPrices.get(slot.id) || parseFloat(slot.price);
         snapshotsToInsert.push({
           invoiceId: invoice.id,
           mealSlotId: slot.id,

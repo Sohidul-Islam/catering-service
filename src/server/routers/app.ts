@@ -234,17 +234,43 @@ export const mealRouter = router({
       // Retrieve all members
       const members = await db.select().from(profiles).where(eq(profiles.organizationId, orgId));
 
-      // Get confirmations for this day
+      // Get confirmations for this day restricted to this organization only (Security Fix)
       const confirmations = await db
-        .select()
+        .select({
+          id: mealConfirmations.id,
+          memberId: mealConfirmations.memberId,
+          mealSlotId: mealConfirmations.mealSlotId,
+          date: mealConfirmations.date,
+          status: mealConfirmations.status,
+          quantity: mealConfirmations.quantity,
+          price: mealConfirmations.price,
+          isOverridden: mealConfirmations.isOverridden,
+          overriddenById: mealConfirmations.overriddenById,
+        })
         .from(mealConfirmations)
-        .where(and(eq(mealConfirmations.date, input.date)));
+        .innerJoin(profiles, eq(mealConfirmations.memberId, profiles.id))
+        .where(
+          and(
+            eq(profiles.organizationId, orgId),
+            eq(mealConfirmations.date, input.date)
+          )
+        );
 
-      // Get recurring preferences
-      const recurringPrefs = await db.select().from(recurringPreferences);
+      // Get recurring preferences for all organization members (Security Fix)
+      const recurringPrefs = await db
+        .select({
+          id: recurringPreferences.id,
+          memberId: recurringPreferences.memberId,
+          mealSlotId: recurringPreferences.mealSlotId,
+          dayOfWeek: recurringPreferences.dayOfWeek,
+          quantity: recurringPreferences.quantity,
+        })
+        .from(recurringPreferences)
+        .innerJoin(profiles, eq(recurringPreferences.memberId, profiles.id))
+        .where(eq(profiles.organizationId, orgId));
 
-      const d = new Date(input.date);
-      const dayOfWeek = d.getDay();
+      const d = new Date(input.date + 'T00:00:00Z');
+      const dayOfWeek = d.getUTCDay(); // UTC safe check
 
       const stats = slots.map((slot) => {
         let confirmedCount = 0;
@@ -311,6 +337,35 @@ export const billingRouter = router({
     .input(z.object({ invoiceId: z.string().uuid() }))
     .mutation(async ({ input }) => {
       return await billingService.sendInvoiceEmail(input.invoiceId);
+    }),
+
+  markAsPaid: orgAdminProcedure
+    .input(z.object({ invoiceId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const orgId = ctx.dbUser!.organizationId!;
+
+      // 1. Fetch the invoice and verify it belongs to this organization (Security Isolation Check)
+      const [invoice] = await db
+        .select()
+        .from(invoices)
+        .where(and(eq(invoices.id, input.invoiceId), eq(invoices.organizationId, orgId)));
+
+      if (!invoice) {
+        throw new Error('Invoice not found or access denied');
+      }
+
+      // 2. Update status manually to paid
+      const [updated] = await db
+        .update(invoices)
+        .set({
+          status: 'paid',
+          paidAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(invoices.id, input.invoiceId))
+        .returning();
+
+      return updated;
     }),
 });
 

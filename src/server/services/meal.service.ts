@@ -1,23 +1,40 @@
 import { db } from '@/db';
-import { mealSlots, mealConfirmations, mealAdjustmentLogs, profiles, recurringPreferences } from '@/db/schema';
+import { mealSlots, mealConfirmations, mealAdjustmentLogs, profiles, recurringPreferences, organizations } from '@/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 
 export class MealService {
   /**
    * Helper to check if the deadline has passed for a given slot and meal date.
    */
-  isPastDeadline(slot: { confirmationDeadline: string; deadlineDaysAhead: number }, mealDateStr: string) {
-    // Current date and time in the organization's timezone
-    const now = new Date();
+  isPastDeadline(slot: { confirmationDeadline: string; deadlineDaysAhead: number }, mealDateStr: string, timezone: string = 'UTC') {
+    // 1. Calculate the deadline date string in YYYY-MM-DD (safely in UTC to avoid local timezone shifts)
+    const d = new Date(mealDateStr + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() - slot.deadlineDaysAhead);
+    const deadlineDateStr = d.toISOString().split('T')[0];
     
-    // Construct the deadline date
-    const mealDate = new Date(mealDateStr);
-    mealDate.setDate(mealDate.getDate() - slot.deadlineDaysAhead);
+    // 2. Format deadline as ISO date time string: YYYY-MM-DDTHH:MM
+    const deadlineDateTimeStr = `${deadlineDateStr}T${slot.confirmationDeadline}`;
     
-    const [hours, minutes] = slot.confirmationDeadline.split(':').map(Number);
-    mealDate.setHours(hours, minutes, 0, 0);
+    // 3. Get the current date and time in the organization's timezone
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    const parts = formatter.formatToParts(new Date());
+    const year = parts.find(p => p.type === 'year')?.value;
+    const month = parts.find(p => p.type === 'month')?.value;
+    const day = parts.find(p => p.type === 'day')?.value;
+    const hour = parts.find(p => p.type === 'hour')?.value;
+    const minute = parts.find(p => p.type === 'minute')?.value;
     
-    return now.getTime() > mealDate.getTime();
+    const orgNowStr = `${year}-${month}-${day}T${hour}:${minute}`;
+    
+    return orgNowStr > deadlineDateTimeStr;
   }
 
   /**
@@ -43,8 +60,11 @@ export class MealService {
       .where(and(eq(mealSlots.id, mealSlotId), eq(mealSlots.organizationId, member.organizationId)));
     if (!slot) throw new Error('Meal slot not found');
 
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, member.organizationId));
+    const timezone = org?.timezone || 'UTC';
+
     // Enforce Cutoff rules
-    if (this.isPastDeadline(slot, date)) {
+    if (this.isPastDeadline(slot, date, timezone)) {
       throw new Error(`The deadline for confirming this ${slot.name} slot has already passed.`);
     }
 
@@ -57,7 +77,7 @@ export class MealService {
     if (existing.length > 0) {
       const [updated] = await db
         .update(mealConfirmations)
-        .set({ status, quantity, updatedAt: new Date() })
+        .set({ status, quantity, price: slot.price, updatedAt: new Date() })
         .where(eq(mealConfirmations.id, existing[0].id))
         .returning();
       return updated;
@@ -70,6 +90,7 @@ export class MealService {
           date,
           status,
           quantity,
+          price: slot.price,
         })
         .returning();
       return created;
@@ -118,6 +139,7 @@ export class MealService {
         .set({
           status,
           quantity,
+          price: slot.price,
           isOverridden: true,
           overriddenById: performedById,
           updatedAt: new Date(),
@@ -133,6 +155,7 @@ export class MealService {
           date,
           status,
           quantity,
+          price: slot.price,
           isOverridden: true,
           overriddenById: performedById,
         })
@@ -162,6 +185,10 @@ export class MealService {
     const [member] = await db.select().from(profiles).where(eq(profiles.id, memberId));
     if (!member || !member.organizationId) return [];
 
+    // Fetch the organization timezone
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, member.organizationId));
+    const timezone = org?.timezone || 'UTC';
+
     // Get active slots for this organization
     const slots = await db
       .select()
@@ -180,12 +207,12 @@ export class MealService {
       : [];
 
     const result = [];
-    const start = new Date(startDateStr);
-    const end = new Date(endDateStr);
+    let current = new Date(startDateStr + 'T00:00:00Z');
+    const last = new Date(endDateStr + 'T00:00:00Z');
 
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split('T')[0];
-      const dayOfWeek = d.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    while (current <= last) {
+      const dateStr = current.toISOString().split('T')[0];
+      const dayOfWeek = current.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
 
       for (const slot of slots) {
         // Find existing confirmation
@@ -199,12 +226,12 @@ export class MealService {
             quantity: found.quantity,
             isOverridden: found.isOverridden,
             confirmationId: found.id,
-            isDeadlinePassed: this.isPastDeadline(slot, dateStr),
+            isDeadlinePassed: this.isPastDeadline(slot, dateStr, timezone),
           });
         } else {
           // If no confirmation exists but they are a recurring member with a preference for this day/slot
           const pref = preferences.find((p) => p.mealSlotId === slot.id && p.dayOfWeek === dayOfWeek);
-          const isDeadlinePassed = this.isPastDeadline(slot, dateStr);
+          const isDeadlinePassed = this.isPastDeadline(slot, dateStr, timezone);
 
           result.push({
             slot,
@@ -217,6 +244,8 @@ export class MealService {
           });
         }
       }
+
+      current.setUTCDate(current.getUTCDate() + 1);
     }
 
     return result;
