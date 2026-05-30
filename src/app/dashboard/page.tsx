@@ -41,12 +41,12 @@ export default function UnifiedDashboard() {
   const [notification, setNotification] = useState<string | null>(null);
 
   // Fetch current database user profile details
-  const { data: dbUser, refetch: refetchUser } = trpc.organization.getCurrentProfile.useQuery(undefined, {
+  const { data: dbUser, isLoading: isProfileLoading, refetch: refetchUser } = trpc.organization.getCurrentProfile.useQuery(undefined, {
     retry: false,
   });
 
   // Fetch organization details
-  const { data: org, refetch: refetchOrg } = trpc.organization.getDetails.useQuery(undefined, {
+  const { data: org, isLoading: isOrgLoading, refetch: refetchOrg } = trpc.organization.getDetails.useQuery(undefined, {
     retry: false,
     enabled: !!dbUser?.organizationId,
   });
@@ -298,11 +298,22 @@ export default function UnifiedDashboard() {
 
   // MOCK DATA FOR LOCAL SANDBOX WORKTHROUGHS
   const sandboxStats = [
-    { label: 'Active Slots Configured', val: slots.length || 3 },
-    { label: 'Registered Employees', val: members.length || 48 },
-    { label: 'Daily Meals Confirmed', val: dailyStats.reduce((acc, s) => acc + s.confirmedCount, 0) || 32 },
+    { label: 'Active Slots Configured', val: slots.length },
+    { label: 'Registered Catering Members', val: members.length },
+    { label: 'Daily Meals Confirmed', val: dailyStats.reduce((acc, s) => acc + s.confirmedCount, 0) },
     { label: 'Invoice Subtotals', val: `$${invoicesList.reduce((acc, inv) => acc + parseFloat(inv.totalAmount), 0).toFixed(2)}` },
   ];
+
+  if (isProfileLoading || (dbUser?.organizationId && isOrgLoading)) {
+    return (
+      <div className="min-h-screen w-full bg-background flex flex-col items-center justify-center gap-4">
+        <div className="p-4 rounded-2xl bg-gradient-to-tr from-primary to-accent text-white shadow-xl animate-pulse">
+          <ChefHat className="h-10 w-10 animate-spin" />
+        </div>
+        <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest animate-pulse">Loading LuxeCater Workspace...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 min-h-screen flex bg-background font-sans">
@@ -331,7 +342,7 @@ export default function UnifiedDashboard() {
             <>
               {([
                 { id: 'overview', name: 'Meal RSVP Board', icon: Calendar },
-                { id: 'members', name: 'Employees & Invites', icon: UserCheck },
+                { id: 'members', name: 'Catering Members & Invites', icon: UserCheck },
                 { id: 'slots', name: 'Meal Slots Timeline', icon: Clock },
                 { id: 'billing', name: 'Monthly Invoices', icon: CreditCard },
                 { id: 'logs', name: 'Audit Logs', icon: ClipboardList },
@@ -481,28 +492,6 @@ export default function UnifiedDashboard() {
               ))}
             </div>
 
-            {/* Admin Tabs */}
-            <div className="flex gap-4 border-b border-border/40 pb-4">
-              {([
-                { id: 'overview', name: 'Meal RSVP overrides' },
-                { id: 'members', name: 'Employees behavior' },
-                { id: 'slots', name: 'Meal slots timeline' },
-                { id: 'billing', name: 'Monthly invoices' },
-                { id: 'logs', name: 'Audit adjustment logs' },
-              ] as const).map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTab(t.id)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                    activeTab === t.id
-                      ? 'bg-secondary text-foreground border border-border'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {t.name}
-                </button>
-              ))}
-            </div>
 
             {/* TAB: Overrides & Stats */}
             {activeTab === 'overview' && (
@@ -559,7 +548,7 @@ export default function UnifiedDashboard() {
                     <table className="w-full text-left text-xs">
                       <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
                         <tr>
-                          <th className="px-8 py-4">Employee</th>
+                          <th className="px-8 py-4">Catering Member</th>
                           <th className="px-6 py-4">Behavior</th>
                           {slots.map((s) => (
                             <th key={s.id} className="px-6 py-4">{s.name} RSVP</th>
@@ -570,7 +559,7 @@ export default function UnifiedDashboard() {
                         {members.length === 0 ? (
                           <tr>
                             <td colSpan={2 + slots.length} className="py-10 text-center text-muted-foreground">
-                              No employees added to override confirmations.
+                              No catering members added to override confirmations.
                             </td>
                           </tr>
                         ) : (
@@ -903,33 +892,7 @@ export default function UnifiedDashboard() {
         {/* 2. ORGANIZATION MEMBER SPACE */}
         {/* ======================================================== */}
         {userRole === 'org_member' && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            
-            {/* Sidebar navigation */}
-            <div className="lg:col-span-1 glassmorphism p-6 rounded-2xl space-y-4 h-fit">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">Member Workspace</span>
-              <div className="flex flex-col gap-2">
-                {([
-                  { id: 'rsvp', name: 'Daily RSVP Calendar' },
-                  { id: 'recurring', name: 'Weekly Preferences' },
-                ] as const).map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => setMemberTab(t.id)}
-                    className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                      memberTab === t.id
-                        ? 'bg-secondary text-foreground border border-border'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {t.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Workspace Area */}
-            <div className="lg:col-span-3 space-y-6">
+          <div className="space-y-6 animate-fade-in">
               
               {/* TAB: RSVP */}
               {memberTab === 'rsvp' && (
@@ -1048,7 +1011,6 @@ export default function UnifiedDashboard() {
                   </button>
                 </div>
               )}
-            </div>
           </div>
         )}
 
@@ -1070,7 +1032,7 @@ export default function UnifiedDashboard() {
                 <input
                   type="email"
                   required
-                  placeholder="employee@corporate.com"
+                  placeholder="member@corporate.com"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
@@ -1084,7 +1046,7 @@ export default function UnifiedDashboard() {
                   onChange={(e) => setInviteRole(e.target.value as 'org_admin' | 'org_member')}
                   className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
                 >
-                  <option value="org_member">Member (Employee)</option>
+                  <option value="org_member">Catering Member (Meal Taker)</option>
                   <option value="org_admin">Admin (Catering Manager)</option>
                 </select>
               </div>

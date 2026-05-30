@@ -10,6 +10,7 @@ import { desc, eq, and, sql, asc } from 'drizzle-orm';
 import { mealService } from '../services/meal.service';
 import { billingService } from '../services/billing.service';
 import { supabaseAdmin } from '../lib/supabase';
+import crypto from 'crypto';
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -165,20 +166,110 @@ export const organizationRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const orgId = ctx.dbUser!.organizationId!;
-      // Check if already invited
-      const [existingInvite] = await db
-        .select()
-        .from(invitations)
-        .where(and(eq(invitations.email, input.email), eq(invitations.organizationId, orgId), eq(invitations.status, 'pending')));
-      
-      if (existingInvite) {
-        throw new Error('Invitation already pending for this email.');
+      const emailLower = input.email.toLowerCase();
+
+      // 1. Check if user already exists in Supabase auth.users
+      const authUserResult = await db.execute(sql`SELECT id FROM auth.users WHERE email = ${emailLower}`);
+      let supabaseUid: string;
+
+      if (authUserResult.length > 0) {
+        supabaseUid = authUserResult[0].id as string;
+        
+        // Ensure email is confirmed
+        await db.execute(sql`
+          UPDATE auth.users
+          SET email_confirmed_at = NOW(),
+              raw_user_meta_data = raw_user_meta_data || '{"email_verified": true}'::jsonb,
+              updated_at = NOW()
+          WHERE id = ${supabaseUid}
+        `);
+      } else {
+        // Forcefully create the user in auth.users and auth.identities
+        supabaseUid = crypto.randomUUID();
+        const passwordHash = '$2a$10$EqhC69sWwS.Q.DpewVfMreW1UoJk52pLp/dI6yXg.K0C/R.G9nKOC'; // 'password'
+
+        await db.execute(sql`
+          INSERT INTO auth.users (
+            instance_id, id, aud, role, email, encrypted_password,
+            email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+            is_sso_user, is_anonymous, created_at, updated_at
+          ) VALUES (
+            '00000000-0000-0000-0000-000000000000',
+            ${supabaseUid},
+            'authenticated',
+            'authenticated',
+            ${emailLower},
+            ${passwordHash},
+            NOW(),
+            '{"provider": "email", "providers": ["email"]}'::jsonb,
+            ${JSON.stringify({ sub: supabaseUid, email: emailLower, email_verified: true, phone_verified: false })}::jsonb,
+            false,
+            false,
+            NOW(),
+            NOW()
+          )
+        `);
+
+        const identityId = crypto.randomUUID();
+        await db.execute(sql`
+          INSERT INTO auth.identities (
+            id, user_id, identity_data, provider, provider_id,
+            last_sign_in_at, created_at, updated_at
+          ) VALUES (
+            ${identityId},
+            ${supabaseUid},
+            ${JSON.stringify({ sub: supabaseUid, email: emailLower, email_verified: true, phone_verified: false })}::jsonb,
+            'email',
+            ${supabaseUid},
+            NOW(),
+            NOW(),
+            NOW()
+          )
+        `);
       }
 
+      // 2. Check/Create database profile
+      const [existingProfile] = await db
+        .select()
+        .from(profiles)
+        .where(eq(profiles.id, supabaseUid));
+
+      if (existingProfile) {
+        await db.update(profiles).set({
+          organizationId: orgId,
+          role: input.role,
+          updatedAt: new Date()
+        }).where(eq(profiles.id, supabaseUid));
+      } else {
+        await db.insert(profiles).values({
+          id: supabaseUid,
+          email: emailLower,
+          role: input.role,
+          organizationId: orgId,
+          isActive: true,
+        });
+      }
+
+      // 3. Add to organization members mapping if not already there
+      const [existingMember] = await db
+        .select()
+        .from(organizationMembers)
+        .where(and(eq(organizationMembers.profileId, supabaseUid), eq(organizationMembers.organizationId, orgId)));
+      
+      if (!existingMember) {
+        await db.insert(organizationMembers).values({
+          profileId: supabaseUid,
+          organizationId: orgId,
+          role: input.role,
+        });
+      }
+
+      // 4. Create accepted invitation record
       const [invite] = await db.insert(invitations).values({
-        email: input.email,
+        email: emailLower,
         organizationId: orgId,
         role: input.role,
+        status: 'accepted',
       }).returning();
 
       return invite;
