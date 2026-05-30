@@ -625,7 +625,7 @@ export default function UnifiedDashboard() {
                       <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
                         <tr>
                           <th className="px-8 py-4">Full Name / Email</th>
-                          <th className="px-6 py-4">Current Behavior Type</th>
+                          <th className="px-6 py-4">RSVP Mode (Behavior)</th>
                           <th className="px-6 py-4">Access Role</th>
                           <th className="px-8 py-4 text-right">Actions</th>
                         </tr>
@@ -637,9 +637,14 @@ export default function UnifiedDashboard() {
                               <p className="font-bold">{m.fullName || 'No Name Provided'}</p>
                               <p className="text-muted-foreground text-[10px]">{m.email}</p>
                             </td>
-                            <td className="px-6 py-4 font-mono text-[10px] font-bold">
-                              <span className={m.mealBehaviorType === 'recurring' ? 'text-indigo-400' : 'text-amber-400'}>
+                            <td className="px-6 py-4 text-[10px]">
+                              <span className={`font-mono font-bold block ${m.mealBehaviorType === 'recurring' ? 'text-indigo-400' : 'text-amber-400'}`}>
                                 {m.mealBehaviorType.toUpperCase()}
+                              </span>
+                              <span className="text-[9px] text-muted-foreground block font-sans">
+                                {m.mealBehaviorType === 'recurring' 
+                                  ? 'Auto-RSVP via template' 
+                                  : 'Manual RSVP required'}
                               </span>
                             </td>
                             <td className="px-6 py-4 uppercase font-bold text-[10px]">{m.role}</td>
