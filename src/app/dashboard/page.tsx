@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/utils/trpc';
 import { 
-  ChefHat, Calendar, Plus, Mail, Clock, Sparkles, ToggleLeft, UserCheck, Check, X 
+  ChefHat, Calendar, Plus, Mail, Clock, Sparkles, ToggleLeft, UserCheck, Check, X, CreditCard, ClipboardList, LogOut
 } from 'lucide-react';
 
 export default function UnifiedDashboard() {
@@ -305,7 +305,7 @@ export default function UnifiedDashboard() {
   ];
 
   return (
-    <div className="flex-1 min-h-screen bg-background flex flex-col font-sans">
+    <div className="flex-1 min-h-screen flex bg-background font-sans">
       {/* Toast Notification */}
       {notification && (
         <div className="fixed bottom-6 right-6 z-50 p-4 rounded-xl border border-accent/20 bg-card shadow-2xl flex items-center justify-between gap-5 transition-all max-w-sm">
@@ -317,94 +317,155 @@ export default function UnifiedDashboard() {
         </div>
       )}
 
-      {/* Corporate Dashboard Navigation */}
-      <header className="sticky top-0 z-40 w-full glassmorphism border-b border-border/40">
-        <div className="max-w-7xl mx-auto px-8 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-tr from-primary to-accent text-white shadow-lg flex items-center">
-              <ChefHat className="h-6 w-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-serif text-xl font-bold text-foreground block">
-                  {mockOrg.name}
-                </span>
-                {myOrgs.length > 1 && (
-                  <select
-                    value={dbUser?.organizationId || ''}
-                    onChange={(e) => handleSwitchOrg(e.target.value)}
-                    className="px-2.5 py-1 bg-secondary border border-border text-foreground rounded-lg text-xs font-semibold focus:outline-none transition-all"
+      {/* Sidebar Navigation */}
+      <aside className="w-64 border-r border-border/40 bg-card/25 backdrop-blur-xl flex flex-col p-6 shrink-0">
+        <Link href="/" className="flex items-center gap-3 mb-10 group">
+          <div className="p-2.5 rounded-xl bg-gradient-to-tr from-primary to-accent text-white shadow-lg">
+            <ChefHat className="h-5 w-5" />
+          </div>
+          <span className="font-serif text-lg font-bold tracking-wide">LuxeCater</span>
+        </Link>
+
+        <nav className="space-y-1.5 flex-grow">
+          {userRole === 'org_admin' ? (
+            <>
+              {([
+                { id: 'overview', name: 'Meal RSVP Board', icon: Calendar },
+                { id: 'members', name: 'Employees & Invites', icon: UserCheck },
+                { id: 'slots', name: 'Meal Slots Timeline', icon: Clock },
+                { id: 'billing', name: 'Monthly Invoices', icon: CreditCard },
+                { id: 'logs', name: 'Audit Logs', icon: ClipboardList },
+              ] as const).map((t) => {
+                const Icon = t.icon;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setActiveTab(t.id)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-medium transition-all ${
+                      activeTab === t.id
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
+                    }`}
                   >
-                    {myOrgs.map((myOrg) => (
-                      <option key={myOrg.id} value={myOrg.id}>
-                        {myOrg.name} ({myOrg.role === 'org_admin' ? 'Admin' : 'Member'})
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-              <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
-                {userRole === 'org_admin' ? 'Organization Admin Console' : 'Member RSVP Space'}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-6">
-            <Link href="/" className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-              Return Home
-            </Link>
-            <span className="h-5 w-px bg-border/40" />
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-              <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider font-mono">
-                {mockOrg.timezone} Time
-              </span>
-            </div>
-          </div>
+                    <Icon className="h-4 w-4" /> {t.name}
+                  </button>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              {([
+                { id: 'rsvp', name: 'Daily RSVP Calendar', icon: Calendar },
+                { id: 'recurring', name: 'Weekly Templates', icon: UserCheck },
+              ] as const).map((t) => {
+                const Icon = t.icon;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setMemberTab(t.id)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-medium transition-all ${
+                      memberTab === t.id
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" /> {t.name}
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </nav>
+
+        <div className="mt-auto border-t border-border/40 pt-4">
+          <Link 
+            href="/login" 
+            className="flex items-center gap-3 px-4 py-3 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/5 text-xs font-medium transition-all"
+          >
+            <LogOut className="h-4 w-4" /> Logout
+          </Link>
         </div>
-      </header>
+      </aside>
 
-      {/* Main Panel */}
-      <main className="max-w-7xl mx-auto px-8 py-10 w-full flex-grow space-y-8">
-        
-        {/* Pending Invitations Banner */}
-        {pendingInvites.length > 0 && (
-          <div className="space-y-4 animate-fade-in">
-            {pendingInvites.map((invite) => (
-              <div key={invite.id} className="p-5 rounded-2xl bg-gradient-to-r from-primary/10 via-accent/15 to-primary/10 border border-accent/20 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl shadow-accent/5">
-                <div className="flex items-center gap-3">
-                  <div className="p-3 bg-accent/20 text-accent rounded-xl">
-                    <Mail className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold uppercase tracking-wider text-accent block">Organization Invitation</span>
-                    <p className="text-sm font-semibold text-foreground">
-                      You have been invited to join <strong className="text-primary">{invite.organizationName}</strong> as an <strong className="capitalize">{invite.role === 'org_admin' ? 'Admin' : 'Member'}</strong>.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => handleAcceptInvite(invite.id)}
-                    className="px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
-                  >
-                    Accept Invite
-                  </button>
-                  <button
-                    onClick={() => handleDeclineInvite(invite.id)}
-                    className="px-4 py-2 rounded-xl text-xs font-bold bg-secondary hover:bg-muted border border-border text-foreground transition-all cursor-pointer"
-                  >
-                    Decline
-                  </button>
-                </div>
-              </div>
-            ))}
+      {/* Main Content Area */}
+      <main className="flex-grow flex flex-col min-h-screen overflow-hidden">
+        {/* Header */}
+        <header className="h-20 border-b border-border/40 flex items-center justify-between px-10 glassmorphism shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="font-serif text-lg font-bold text-foreground block">
+                {mockOrg.name}
+              </span>
+              {myOrgs.length > 1 && (
+                <select
+                  value={dbUser?.organizationId || ''}
+                  onChange={(e) => handleSwitchOrg(e.target.value)}
+                  className="px-2.5 py-1 bg-secondary border border-border text-foreground rounded-lg text-xs font-semibold focus:outline-none transition-all"
+                >
+                  {myOrgs.map((myOrg) => (
+                    <option key={myOrg.id} value={myOrg.id}>
+                      {myOrg.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
+              ({mockOrg.timezone} timezone)
+            </span>
           </div>
-        )}
 
-        {/* ======================================================== */}
-        {/* 1. ORGANIZATION ADMIN PORTAL */}
-        {/* ======================================================== */}
-        {userRole === 'org_admin' && (
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-4">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-accent to-primary text-white flex items-center justify-center font-bold text-xs uppercase shadow-md">
+                {dbUser?.fullName?.slice(0, 2).toUpperCase() || 'U'}
+              </div>
+              <div className="hidden sm:block text-left">
+                <p className="text-xs font-semibold">{dbUser?.fullName || dbUser?.email || 'Logged In User'}</p>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-mono">{userRole}</p>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Content Wrapper */}
+        <div className="flex-1 p-10 overflow-y-auto relative space-y-8">
+          {/* Pending Invitations Banner */}
+          {pendingInvites.length > 0 && (
+            <div className="space-y-4 animate-fade-in">
+              {pendingInvites.map((invite) => (
+                <div key={invite.id} className="p-5 rounded-2xl bg-gradient-to-r from-primary/10 via-accent/15 to-primary/10 border border-accent/20 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl shadow-accent/5">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-accent/20 text-accent rounded-xl">
+                      <Mail className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-accent block">Organization Invitation</span>
+                      <p className="text-sm font-semibold text-foreground">
+                        You have been invited to join <strong className="text-primary">{invite.organizationName}</strong> as an <strong className="capitalize">{invite.role === 'org_admin' ? 'Admin' : 'Member'}</strong>.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => handleAcceptInvite(invite.id)}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
+                    >
+                      Accept Invite
+                    </button>
+                    <button
+                      onClick={() => handleDeclineInvite(invite.id)}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-secondary hover:bg-muted border border-border text-foreground transition-all cursor-pointer"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {userRole === 'org_admin' && (
           <>
             {/* Quick Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -991,7 +1052,12 @@ export default function UnifiedDashboard() {
           </div>
         )}
 
-      </main>
+        {/* Footer */}
+        <footer className="border-t border-border/40 py-8 text-center text-xs text-muted-foreground bg-secondary/5 mt-12">
+          LuxeCater Corporate Management Suite. Live connection active.
+        </footer>
+      </div>
+    </main>
 
       {/* Invite Member Dialog Modal */}
       {showInviteModal && (
@@ -1143,10 +1209,6 @@ export default function UnifiedDashboard() {
         </div>
       )}
 
-      {/* Footer */}
-      <footer className="border-t border-border/40 py-8 text-center text-xs text-muted-foreground bg-secondary/5 mt-auto">
-        LuxeCater Corporate Management Suite. Live connection active.
-      </footer>
     </div>
   );
 }
