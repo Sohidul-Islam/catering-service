@@ -1,11 +1,15 @@
 import { db } from '@/db';
-import { organizations, profiles, mealSlots, mealConfirmations, recurringPreferences, invoices, billingSnapshots } from '@/db/schema';
+import { organizations, profiles, mealSlots, mealConfirmations, recurringPreferences, invoices, billingSnapshots, holidays, memberLeaves } from '@/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { resend } from '../lib/resend';
 
 export class BillingService {
   /**
    * Generates a monthly invoice draft for an organization based on meals consumed.
+   * Respects:
+   * - Organization holidays (skipped days)
+   * - Member joined_at / left_at date ranges (only bill active members per day)
+   * - Historical booking prices over current slot prices
    */
   async generateInvoice(organizationId: string, startDateStr: string, endDateStr: string) {
     // 1. Fetch organization details
@@ -21,7 +25,45 @@ export class BillingService {
     // 3. Fetch all active meal slots
     const slots = await db.select().from(mealSlots).where(eq(mealSlots.organizationId, organizationId));
 
-    // 4. Fetch all explicit confirmations in the period FOR THIS ORGANIZATION ONLY (Security & Scale Fix)
+    // Fetch organization holidays within billing period
+    const orgHolidays = await db
+      .select()
+      .from(holidays)
+      .where(
+        and(
+          eq(holidays.organizationId, organizationId),
+          sql`${holidays.date} >= ${startDateStr}`,
+          sql`${holidays.date} <= ${endDateStr}`
+        )
+      );
+    const holidayDates = new Set(orgHolidays.map(h => h.date));
+
+    // 5b. Fetch all member leaves within billing period for this organization
+    const orgMemberLeaves = await db
+      .select()
+      .from(memberLeaves)
+      .where(
+        and(
+          eq(memberLeaves.organizationId, organizationId),
+          sql`${memberLeaves.endDate} >= ${startDateStr}`,
+          sql`${memberLeaves.startDate} <= ${endDateStr}`
+        )
+      );
+    // Build a per-member set of leave dates for O(1) lookup
+    const memberLeaveDates = new Map<string, Set<string>>();
+    for (const leave of orgMemberLeaves) {
+      if (!memberLeaveDates.has(leave.memberId)) {
+        memberLeaveDates.set(leave.memberId, new Set());
+      }
+      let cur = new Date(leave.startDate + 'T00:00:00Z');
+      const leaveEnd = new Date(leave.endDate + 'T00:00:00Z');
+      while (cur <= leaveEnd) {
+        memberLeaveDates.get(leave.memberId)!.add(cur.toISOString().split('T')[0]);
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+    }
+
+    // 5. Fetch all explicit confirmations in the period FOR THIS ORGANIZATION ONLY
     const confirmations = await db
       .select({
         id: mealConfirmations.id,
@@ -46,7 +88,7 @@ export class BillingService {
         )
       );
 
-    // 5. Fetch recurring preferences for all organization members (Security Fix: filter by organization)
+    // 6. Fetch recurring preferences for all organization members
     const recurringPrefs = await db
       .select({
         id: recurringPreferences.id,
@@ -64,24 +106,51 @@ export class BillingService {
 
     // Track quantity consumed per meal slot ID
     const slotQuantities = new Map<string, number>();
-    const slotPrices = new Map<string, number>(); // Track weighted/average or unit prices for snapshots
+    const slotPrices = new Map<string, number>();
     for (const slot of slots) {
       slotQuantities.set(slot.id, 0);
       slotPrices.set(slot.id, parseFloat(slot.price));
     }
 
-    // For each member, iterate over each date in the period to compute confirmations
+    // For each member, iterate over each date in the period
     for (const member of members) {
       const memberPrefs = recurringPrefs.filter((p) => p.memberId === member.id);
       const memberConfirmations = confirmations.filter((c) => c.memberId === member.id);
 
-      // Timezone-safe date looping using UTC boundaries
+      // Determine member's active billing window
+      const memberJoinedAt = member.joinedAt ? member.joinedAt.toISOString().split('T')[0] : startDateStr;
+      const memberLeftAt = member.leftAt ? member.leftAt.toISOString().split('T')[0] : null;
+
+      // UTC-safe date loop
       let current = new Date(startDateStr + 'T00:00:00Z');
       const last = new Date(endDateStr + 'T00:00:00Z');
 
       while (current <= last) {
         const dateStr = current.toISOString().split('T')[0];
         const dayOfWeek = current.getUTCDay();
+
+        // Skip organization holidays
+        if (holidayDates.has(dateStr)) {
+          current.setUTCDate(current.getUTCDate() + 1);
+          continue;
+        }
+
+        // Skip dates before member joined or after member left
+        if (dateStr < memberJoinedAt) {
+          current.setUTCDate(current.getUTCDate() + 1);
+          continue;
+        }
+        if (memberLeftAt && dateStr > memberLeftAt) {
+          current.setUTCDate(current.getUTCDate() + 1);
+          continue;
+        }
+
+        // Skip dates where the member is on approved leave
+        const memberLeaveSet = memberLeaveDates.get(member.id);
+        if (memberLeaveSet && memberLeaveSet.has(dateStr)) {
+          current.setUTCDate(current.getUTCDate() + 1);
+          continue;
+        }
 
         for (const slot of slots) {
           const explicitConf = memberConfirmations.find((c) => c.mealSlotId === slot.id && c.date === dateStr);
@@ -92,12 +161,11 @@ export class BillingService {
           if (explicitConf) {
             isConfirmed = explicitConf.status === 'confirmed';
             quantity = explicitConf.quantity;
-            // Use historical pricing snapshot if available, else fallback to current slot price
+            // Use historical booking price if available
             if (explicitConf.price) {
               activePrice = parseFloat(explicitConf.price);
             }
           } else if (member.mealBehaviorType === 'recurring') {
-            // Check recurring pref default
             const pref = memberPrefs.find((p) => p.mealSlotId === slot.id && p.dayOfWeek === dayOfWeek);
             if (pref) {
               isConfirmed = true;
@@ -111,8 +179,6 @@ export class BillingService {
 
             const currentQty = slotQuantities.get(slot.id) || 0;
             slotQuantities.set(slot.id, currentQty + quantity);
-            
-            // Lock in the active price for snapshots (if multiple exist, it takes the last active price)
             slotPrices.set(slot.id, activePrice);
           }
         }
@@ -121,7 +187,7 @@ export class BillingService {
       }
     }
 
-    // 6. Save draft invoice to DB
+    // 7. Save draft invoice to DB
     const [invoice] = await db
       .insert(invoices)
       .values({
@@ -134,7 +200,7 @@ export class BillingService {
       })
       .returning();
 
-    // 7. Save billing snapshots to DB
+    // 8. Save billing snapshots to DB
     const snapshotsToInsert = [];
     for (const slot of slots) {
       const quantity = slotQuantities.get(slot.id) || 0;
@@ -190,7 +256,7 @@ export class BillingService {
           </tr>
         </table>
         
-        <p>Please log in to your catering portal to approve and settle payment via credit card or bank transfer.</p>
+        <p>Please log in to your catering portal to approve and settle payment.</p>
         <hr style="border: 0; border-top: 1px solid #eee; margin: 25px 0;" />
         <p style="font-size: 0.8em; color: #888;">This is an automated operational invoice from LuxeCater Meal Management SaaS.</p>
       </div>

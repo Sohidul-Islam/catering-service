@@ -10,6 +10,7 @@ export const mealSlots = pgTable('meal_slots', {
   confirmationDeadline: text('confirmation_deadline').notNull(), // e.g., '22:00'
   deadlineDaysAhead: integer('deadline_days_ahead').default(0).notNull(), // 0 = same day, 1 = day before
   price: numeric('price', { precision: 10, scale: 2 }).notNull(),
+  capacity: integer('capacity'), // nullable - null means unlimited
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

@@ -7,12 +7,21 @@ import { mealConfirmations } from '../schema/confirmations';
 import { invoices } from '../schema/invoices';
 import { mealAdjustmentLogs } from '../schema/logs';
 import { notifications } from '../schema/notifications';
+import { holidays } from '../schema/holidays';
+import { departments } from '../schema/departments';
+import { officeLocations } from '../schema/office_locations';
+import { billingAdjustments } from '../schema/billing_adjustments';
+import { memberLeaves } from '../schema/member_leaves';
 
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   members: many(profiles),
   slots: many(mealSlots),
   invoices: many(invoices),
   logs: many(mealAdjustmentLogs),
+  holidays: many(holidays),
+  departments: many(departments),
+  officeLocations: many(officeLocations),
+  memberLeaves: many(memberLeaves),
 }));
 
 export const profilesRelations = relations(profiles, ({ one, many }) => ({
@@ -25,6 +34,7 @@ export const profilesRelations = relations(profiles, ({ one, many }) => ({
   performedLogs: many(mealAdjustmentLogs, { relationName: 'performedLogs' }),
   receivedLogs: many(mealAdjustmentLogs, { relationName: 'receivedLogs' }),
   notifications: many(notifications),
+  leaves: many(memberLeaves),
 }));
 
 export const mealSlotsRelations = relations(mealSlots, ({ one, many }) => ({
@@ -63,10 +73,22 @@ export const mealConfirmationsRelations = relations(mealConfirmations, ({ one })
   }),
 }));
 
-export const invoicesRelations = relations(invoices, ({ one }) => ({
+export const invoicesRelations = relations(invoices, ({ one, many }) => ({
   organization: one(organizations, {
     fields: [invoices.organizationId],
     references: [organizations.id],
+  }),
+  adjustments: many(billingAdjustments),
+}));
+
+export const billingAdjustmentsRelations = relations(billingAdjustments, ({ one }) => ({
+  invoice: one(invoices, {
+    fields: [billingAdjustments.invoiceId],
+    references: [invoices.id],
+  }),
+  createdBy: one(profiles, {
+    fields: [billingAdjustments.createdById],
+    references: [profiles.id],
   }),
 }));
 
@@ -95,5 +117,39 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
   user: one(profiles, {
     fields: [notifications.userId],
     references: [profiles.id],
+  }),
+}));
+
+export const holidaysRelations = relations(holidays, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [holidays.organizationId],
+    references: [organizations.id],
+  }),
+}));
+
+export const departmentsRelations = relations(departments, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [departments.organizationId],
+    references: [organizations.id],
+  }),
+  members: many(profiles),
+}));
+
+export const officeLocationsRelations = relations(officeLocations, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [officeLocations.organizationId],
+    references: [organizations.id],
+  }),
+  members: many(profiles),
+}));
+
+export const memberLeavesRelations = relations(memberLeaves, ({ one }) => ({
+  member: one(profiles, {
+    fields: [memberLeaves.memberId],
+    references: [profiles.id],
+  }),
+  organization: one(organizations, {
+    fields: [memberLeaves.organizationId],
+    references: [organizations.id],
   }),
 }));
