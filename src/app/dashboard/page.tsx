@@ -1122,7 +1122,7 @@ export default function UnifiedDashboard() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Cutoff Time</label>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">RSVP Cutoff Time (HH:MM)</label>
                   <input
                     type="text"
                     required
@@ -1133,14 +1133,14 @@ export default function UnifiedDashboard() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Days Ahead</label>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">RSVP Deadline Day</label>
                   <select
                     value={slotDaysAhead}
                     onChange={(e) => setSlotDaysAhead(parseInt(e.target.value))}
                     className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
                   >
-                    <option value="0">Same Day (0 days ahead)</option>
-                    <option value="1">Previous Day (1 day ahead)</option>
+                    <option value="0">Same Day of Meal</option>
+                    <option value="1">1 Day Before Meal</option>
                   </select>
                 </div>
               </div>
