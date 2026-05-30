@@ -1061,9 +1061,10 @@ export default function UnifiedDashboard() {
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 transition-all"
+                  disabled={inviteMemberMutation.isPending}
+                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 transition-all disabled:opacity-50"
                 >
-                  Send Invite
+                  {inviteMemberMutation.isPending ? 'Sending...' : 'Send Invite'}
                 </button>
               </div>
             </form>
