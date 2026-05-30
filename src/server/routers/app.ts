@@ -1,14 +1,16 @@
-import { router, superAdminProcedure, orgAdminProcedure, orgMemberProcedure } from '../trpc';
+import { router, superAdminProcedure, orgAdminProcedure, orgMemberProcedure, publicProcedure, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { db } from '@/db';
 import {
   organizations, profiles, mealSlots, recurringPreferences, mealConfirmations,
   invoices, mealAdjustmentLogs, holidays, departments, officeLocations,
-  billingAdjustments, memberLeaves,
+  billingAdjustments, memberLeaves, organizationMembers, invitations,
 } from '@/db/schema';
 import { desc, eq, and, sql, asc } from 'drizzle-orm';
 import { mealService } from '../services/meal.service';
 import { billingService } from '../services/billing.service';
+import { supabaseAdmin } from '../lib/supabase';
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ORGANIZATION ROUTER
@@ -22,8 +24,75 @@ export const organizationRouter = router({
       logoUrl: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
-      const [org] = await db.insert(organizations).values(input).returning();
+      const [org] = await db.insert(organizations).values({ ...input, isApproved: true }).returning();
       return org;
+    }),
+
+  register: publicProcedure
+    .input(z.object({
+      name: z.string().min(1),
+      billingEmail: z.string().email(),
+      timezone: z.string().default('UTC'),
+      adminEmail: z.string().email(),
+      adminPassword: z.string().min(6),
+      adminName: z.string().min(1),
+    }))
+    .mutation(async ({ input }) => {
+      // 1. Create the Supabase user
+      const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
+        email: input.adminEmail,
+        password: input.adminPassword,
+        email_confirm: true,
+      });
+
+      if (authError || !authUser.user) {
+        throw new Error(authError?.message || 'Failed to create admin user account');
+      }
+
+      // 2. Create the organization (unapproved)
+      const [org] = await db.insert(organizations).values({
+        name: input.name,
+        billingEmail: input.billingEmail,
+        timezone: input.timezone,
+        isApproved: false,
+      }).returning();
+
+      // 3. Create the profile for the admin user
+      await db.insert(profiles).values({
+        id: authUser.user.id,
+        email: input.adminEmail,
+        fullName: input.adminName,
+        role: 'org_admin',
+        organizationId: org.id,
+        isActive: true,
+      });
+
+      // 4. Create the organization member mapping
+      await db.insert(organizationMembers).values({
+        profileId: authUser.user.id,
+        organizationId: org.id,
+        role: 'org_admin',
+      });
+
+      return org;
+    }),
+
+  approve: superAdminProcedure
+    .input(z.object({ organizationId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const [updated] = await db
+        .update(organizations)
+        .set({ isApproved: true, updatedAt: new Date() })
+        .where(eq(organizations.id, input.organizationId))
+        .returning();
+      return updated;
+    }),
+
+  reject: superAdminProcedure
+    .input(z.object({ organizationId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      await db.delete(organizations).where(eq(organizations.id, input.organizationId));
+      return { success: true };
     }),
 
   getAll: superAdminProcedure.query(async () => {
@@ -54,13 +123,182 @@ export const organizationRouter = router({
       return updated;
     }),
 
+  // ── Multi-Org & Invitations ──────────────────────────────────────────────
+  getMyOrganizations: protectedProcedure.query(async ({ ctx }) => {
+    return await db
+      .select({
+        id: organizations.id,
+        name: organizations.name,
+        logoUrl: organizations.logoUrl,
+        isApproved: organizations.isApproved,
+        role: organizationMembers.role,
+      })
+      .from(organizationMembers)
+      .innerJoin(organizations, eq(organizationMembers.organizationId, organizations.id))
+      .where(eq(organizationMembers.profileId, ctx.user.id));
+  }),
+
+  switchOrganization: protectedProcedure
+    .input(z.object({ organizationId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const [membership] = await db
+        .select()
+        .from(organizationMembers)
+        .where(and(eq(organizationMembers.profileId, ctx.user.id), eq(organizationMembers.organizationId, input.organizationId)));
+      
+      if (!membership) {
+        throw new Error('Access denied: not a member of this organization');
+      }
+
+      await db
+        .update(profiles)
+        .set({ organizationId: input.organizationId, role: membership.role, updatedAt: new Date() })
+        .where(eq(profiles.id, ctx.user.id));
+
+      return { success: true };
+    }),
+
+  inviteMember: orgAdminProcedure
+    .input(z.object({
+      email: z.string().email(),
+      role: z.enum(['org_admin', 'org_member']).default('org_member'),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const orgId = ctx.dbUser!.organizationId!;
+      // Check if already invited
+      const [existingInvite] = await db
+        .select()
+        .from(invitations)
+        .where(and(eq(invitations.email, input.email), eq(invitations.organizationId, orgId), eq(invitations.status, 'pending')));
+      
+      if (existingInvite) {
+        throw new Error('Invitation already pending for this email.');
+      }
+
+      const [invite] = await db.insert(invitations).values({
+        email: input.email,
+        organizationId: orgId,
+        role: input.role,
+      }).returning();
+
+      return invite;
+    }),
+
+  getSentInvitations: orgAdminProcedure.query(async ({ ctx }) => {
+    const orgId = ctx.dbUser!.organizationId!;
+    return await db
+      .select()
+      .from(invitations)
+      .where(eq(invitations.organizationId, orgId))
+      .orderBy(desc(invitations.createdAt));
+  }),
+
+  getPendingInvitations: protectedProcedure.query(async ({ ctx }) => {
+    return await db
+      .select({
+        id: invitations.id,
+        email: invitations.email,
+        role: invitations.role,
+        status: invitations.status,
+        createdAt: invitations.createdAt,
+        organizationName: organizations.name,
+      })
+      .from(invitations)
+      .innerJoin(organizations, eq(invitations.organizationId, organizations.id))
+      .where(and(eq(invitations.email, ctx.user.email!), eq(invitations.status, 'pending')));
+  }),
+
+  acceptInvitation: protectedProcedure
+    .input(z.object({ invitationId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const [invite] = await db
+        .select()
+        .from(invitations)
+        .where(eq(invitations.id, input.invitationId));
+
+      if (!invite || invite.status !== 'pending') {
+        throw new Error('Invitation not found or no longer pending.');
+      }
+
+      if (invite.email.toLowerCase() !== ctx.user.email!.toLowerCase()) {
+        throw new Error('This invitation was sent to a different email address.');
+      }
+
+      // Check if already a member
+      const [existingMember] = await db
+        .select()
+        .from(organizationMembers)
+        .where(and(eq(organizationMembers.profileId, ctx.user.id), eq(organizationMembers.organizationId, invite.organizationId)));
+
+      if (!existingMember) {
+        await db.insert(organizationMembers).values({
+          profileId: ctx.user.id,
+          organizationId: invite.organizationId,
+          role: invite.role,
+        });
+      }
+
+      // Accept invitation
+      await db
+        .update(invitations)
+        .set({ status: 'accepted' })
+        .where(eq(invitations.id, input.invitationId));
+
+      // Switch active organization
+      await db
+        .update(profiles)
+        .set({ organizationId: invite.organizationId, role: invite.role, updatedAt: new Date() })
+        .where(eq(profiles.id, ctx.user.id));
+
+      return { success: true };
+    }),
+
+  declineInvitation: protectedProcedure
+    .input(z.object({ invitationId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const [invite] = await db
+        .select()
+        .from(invitations)
+        .where(eq(invitations.id, input.invitationId));
+
+      if (!invite || invite.status !== 'pending') {
+        throw new Error('Invitation not found or no longer pending.');
+      }
+
+      if (invite.email.toLowerCase() !== ctx.user.email!.toLowerCase()) {
+        throw new Error('This invitation was sent to a different email address.');
+      }
+
+      await db
+        .update(invitations)
+        .set({ status: 'declined' })
+        .where(eq(invitations.id, input.invitationId));
+
+      return { success: true };
+    }),
+
   // ── Member Management ────────────────────────────────────────────────────
   getMembers: orgAdminProcedure.query(async ({ ctx }) => {
     const orgId = ctx.dbUser!.organizationId!;
     return await db
-      .select()
+      .select({
+        id: profiles.id,
+        email: profiles.email,
+        fullName: profiles.fullName,
+        phoneNumber: profiles.phoneNumber,
+        role: organizationMembers.role,
+        mealBehaviorType: profiles.mealBehaviorType,
+        departmentId: profiles.departmentId,
+        officeLocationId: profiles.officeLocationId,
+        isActive: profiles.isActive,
+        joinedAt: profiles.joinedAt,
+        leftAt: profiles.leftAt,
+        createdAt: profiles.createdAt,
+        updatedAt: profiles.updatedAt,
+      })
       .from(profiles)
-      .where(and(eq(profiles.organizationId, orgId), eq(profiles.isActive, true)))
+      .innerJoin(organizationMembers, eq(profiles.id, organizationMembers.profileId))
+      .where(and(eq(organizationMembers.organizationId, orgId), eq(profiles.isActive, true)))
       .orderBy(desc(profiles.createdAt));
   }),
 
@@ -79,13 +317,39 @@ export const organizationRouter = router({
     .mutation(async ({ input, ctx }) => {
       const orgId = ctx.dbUser!.organizationId!;
       const { joinedAt, ...rest } = input;
-      const [created] = await db.insert(profiles).values({
-        ...rest,
-        organizationId: orgId,
-        joinedAt: joinedAt ? new Date(joinedAt) : new Date(),
-      }).returning();
+      
+      const [existingProfile] = await db.select().from(profiles).where(eq(profiles.email, input.email));
+      let profileId = input.id;
+      let created = null;
+
+      if (!existingProfile) {
+        [created] = await db.insert(profiles).values({
+          ...rest,
+          organizationId: orgId,
+          joinedAt: joinedAt ? new Date(joinedAt) : new Date(),
+        }).returning();
+        profileId = created.id;
+      } else {
+        profileId = existingProfile.id;
+        created = existingProfile;
+      }
+
+      const [existingMember] = await db
+        .select()
+        .from(organizationMembers)
+        .where(and(eq(organizationMembers.profileId, profileId), eq(organizationMembers.organizationId, orgId)));
+      
+      if (!existingMember) {
+        await db.insert(organizationMembers).values({
+          profileId,
+          organizationId: orgId,
+          role: input.role,
+        });
+      }
+
       return created;
     }),
+
 
   deactivateMember: orgAdminProcedure
     .input(z.object({ memberId: z.string(), leftAt: z.string().optional() }))
@@ -281,6 +545,18 @@ export const organizationRouter = router({
       await db.delete(memberLeaves).where(and(eq(memberLeaves.id, input.leaveId), eq(memberLeaves.organizationId, orgId)));
       return { success: true };
     }),
+
+  getCurrentProfile: protectedProcedure.query(async ({ ctx }) => {
+    if (!ctx.dbUser) return null;
+    return {
+      id: ctx.dbUser.id,
+      email: ctx.dbUser.email,
+      fullName: ctx.dbUser.fullName,
+      phoneNumber: ctx.dbUser.phoneNumber,
+      role: ctx.dbUser.role,
+      organizationId: ctx.dbUser.organizationId,
+    };
+  }),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

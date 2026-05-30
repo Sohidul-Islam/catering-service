@@ -12,6 +12,8 @@ import { departments } from '../schema/departments';
 import { officeLocations } from '../schema/office_locations';
 import { billingAdjustments } from '../schema/billing_adjustments';
 import { memberLeaves } from '../schema/member_leaves';
+import { organizationMembers } from '../schema/organization_members';
+import { invitations } from '../schema/invitations';
 
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   members: many(profiles),
@@ -22,6 +24,8 @@ export const organizationsRelations = relations(organizations, ({ many }) => ({
   departments: many(departments),
   officeLocations: many(officeLocations),
   memberLeaves: many(memberLeaves),
+  organizationMembers: many(organizationMembers),
+  invitations: many(invitations),
 }));
 
 export const profilesRelations = relations(profiles, ({ one, many }) => ({
@@ -153,3 +157,22 @@ export const memberLeavesRelations = relations(memberLeaves, ({ one }) => ({
     references: [organizations.id],
   }),
 }));
+
+export const organizationMembersRelations = relations(organizationMembers, ({ one }) => ({
+  profile: one(profiles, {
+    fields: [organizationMembers.profileId],
+    references: [profiles.id],
+  }),
+  organization: one(organizations, {
+    fields: [organizationMembers.organizationId],
+    references: [organizations.id],
+  }),
+}));
+
+export const invitationsRelations = relations(invitations, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [invitations.organizationId],
+    references: [organizations.id],
+  }),
+}));
+

@@ -15,12 +15,10 @@ export default function UnifiedDashboard() {
   const [rsvpDate, setRsvpDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedPrefSlots, setSelectedPrefSlots] = useState<{ slotId: string; day: number; qty: number }[]>([]);
 
-  // Admin Specific States
-  const [newMemberEmail, setNewMemberEmail] = useState('');
-  const [newMemberName, setNewMemberName] = useState('');
-  const [newMemberRole, setNewMemberRole] = useState<'org_admin' | 'org_member'>('org_member');
-  const [newMemberBehavior, setNewMemberBehavior] = useState<'recurring' | 'flexible'>('flexible');
-  const [showMemberModal, setShowMemberModal] = useState(false);
+  // Admin Specific States (Invites)
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'org_admin' | 'org_member'>('org_member');
+  const [showInviteModal, setShowInviteModal] = useState(false);
 
   // New Slot States
   const [slotName, setSlotName] = useState('');
@@ -42,15 +40,26 @@ export default function UnifiedDashboard() {
   // Alert toast
   const [notification, setNotification] = useState<string | null>(null);
 
-  // 1. Fetch organization details
-  const { data: org } = trpc.organization.getDetails.useQuery(undefined, {
+  // Fetch current database user profile details
+  const { data: dbUser, refetch: refetchUser } = trpc.organization.getCurrentProfile.useQuery(undefined, {
     retry: false,
   });
 
-  // Resolve client user role and credentials
-  // If there's no DB user active (sandbox mode), we default to organization admin view
-  const userRole = org ? (org.billingEmail.includes('demo') ? 'org_member' : 'org_admin') : 'org_admin'; 
-  const mockOrg = { name: org?.name || 'Acme Corporate Sandbox', timezone: org?.timezone || 'UTC' };
+  // Fetch organization details
+  const { data: org, refetch: refetchOrg } = trpc.organization.getDetails.useQuery(undefined, {
+    retry: false,
+    enabled: !!dbUser?.organizationId,
+  });
+
+  const userRole = dbUser?.role || 'org_member';
+  const mockOrg = { name: org?.name || 'Loading organization...', timezone: org?.timezone || 'UTC' };
+
+  // Fetch joined organizations and invitations
+  const { data: myOrgs = [], refetch: refetchMyOrgs } = trpc.organization.getMyOrganizations.useQuery();
+  const { data: pendingInvites = [], refetch: refetchPendingInvites } = trpc.organization.getPendingInvitations.useQuery();
+  const { data: sentInvites = [], refetch: refetchSentInvites } = trpc.organization.getSentInvitations.useQuery(undefined, {
+    enabled: !!org && userRole === 'org_admin',
+  });
 
   // tRPC Queries and Mutations
   const { data: members = [], refetch: refetchMembers } = trpc.organization.getMembers.useQuery(undefined, {
@@ -85,7 +94,6 @@ export default function UnifiedDashboard() {
   });
 
   // Mutations
-  const addMemberMutation = trpc.organization.addMember.useMutation();
   const toggleBehaviorMutation = trpc.organization.toggleMemberBehavior.useMutation();
   const createSlotMutation = trpc.organization.createSlot.useMutation();
   const confirmMealMutation = trpc.meal.confirmMeal.useMutation();
@@ -93,6 +101,12 @@ export default function UnifiedDashboard() {
   const savePrefsMutation = trpc.meal.saveRecurringPreferences.useMutation();
   const generateInvoiceMutation = trpc.billing.generateInvoice.useMutation();
   const sendInvoiceEmailMutation = trpc.billing.sendInvoiceEmail.useMutation();
+  
+  const switchOrgMutation = trpc.organization.switchOrganization.useMutation();
+  const inviteMemberMutation = trpc.organization.inviteMember.useMutation();
+  const acceptInviteMutation = trpc.organization.acceptInvitation.useMutation();
+  const declineInviteMutation = trpc.organization.declineInvitation.useMutation();
+
 
   // Populate user preferences checklist on load
   useEffect(() => {
@@ -104,27 +118,66 @@ export default function UnifiedDashboard() {
     }
   }, [userPrefs]);
 
-  const handleAddMember = async (e: React.FormEvent) => {
+  const handleInviteMember = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const mockUid = `usr-${Date.now().toString().slice(-6)}`;
-      await addMemberMutation.mutateAsync({
-        id: mockUid,
-        email: newMemberEmail,
-        fullName: newMemberName,
-        role: newMemberRole,
-        mealBehaviorType: newMemberBehavior,
+      await inviteMemberMutation.mutateAsync({
+        email: inviteEmail,
+        role: inviteRole,
       });
-      setNewMemberEmail('');
-      setNewMemberName('');
-      setShowMemberModal(false);
-      setNotification(`🎉 Member added successfully!`);
-      refetchMembers();
+      setInviteEmail('');
+      setShowInviteModal(false);
+      setNotification(`🎉 Invitation sent to ${inviteEmail}!`);
+      refetchSentInvites();
     } catch (err) {
       const error = err as Error;
       setNotification(`❌ Error: ${error.message}`);
     }
   };
+
+  const handleSwitchOrg = async (orgId: string) => {
+    try {
+      await switchOrgMutation.mutateAsync({ organizationId: orgId });
+      setNotification(`Switched organization workspace.`);
+      refetchUser();
+      refetchOrg();
+      refetchMembers();
+      refetchSlots();
+      refetchStats();
+      refetchConfirmations();
+      refetchUserPrefs();
+      refetchInvoices();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
+  const handleAcceptInvite = async (inviteId: string) => {
+    try {
+      await acceptInviteMutation.mutateAsync({ invitationId: inviteId });
+      setNotification(`Joined organization!`);
+      refetchPendingInvites();
+      refetchMyOrgs();
+      refetchUser();
+      refetchOrg();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
+  const handleDeclineInvite = async (inviteId: string) => {
+    try {
+      await declineInviteMutation.mutateAsync({ invitationId: inviteId });
+      setNotification(`Declined invitation.`);
+      refetchPendingInvites();
+    } catch (err) {
+      const error = err as Error;
+      setNotification(`❌ Error: ${error.message}`);
+    }
+  };
+
 
   const handleToggleBehavior = async (memberId: string, currentBehavior: 'recurring' | 'flexible') => {
     try {
@@ -272,9 +325,24 @@ export default function UnifiedDashboard() {
               <ChefHat className="h-6 w-6" />
             </div>
             <div>
-              <span className="font-serif text-xl font-bold text-foreground block">
-                {mockOrg.name}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-serif text-xl font-bold text-foreground block">
+                  {mockOrg.name}
+                </span>
+                {myOrgs.length > 1 && (
+                  <select
+                    value={dbUser?.organizationId || ''}
+                    onChange={(e) => handleSwitchOrg(e.target.value)}
+                    className="px-2.5 py-1 bg-secondary border border-border text-foreground rounded-lg text-xs font-semibold focus:outline-none transition-all"
+                  >
+                    {myOrgs.map((myOrg) => (
+                      <option key={myOrg.id} value={myOrg.id}>
+                        {myOrg.name} ({myOrg.role === 'org_admin' ? 'Admin' : 'Member'})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
               <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
                 {userRole === 'org_admin' ? 'Organization Admin Console' : 'Member RSVP Space'}
               </span>
@@ -298,6 +366,41 @@ export default function UnifiedDashboard() {
       {/* Main Panel */}
       <main className="max-w-7xl mx-auto px-8 py-10 w-full flex-grow space-y-8">
         
+        {/* Pending Invitations Banner */}
+        {pendingInvites.length > 0 && (
+          <div className="space-y-4 animate-fade-in">
+            {pendingInvites.map((invite) => (
+              <div key={invite.id} className="p-5 rounded-2xl bg-gradient-to-r from-primary/10 via-accent/15 to-primary/10 border border-accent/20 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl shadow-accent/5">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-accent/20 text-accent rounded-xl">
+                    <Mail className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-accent block">Organization Invitation</span>
+                    <p className="text-sm font-semibold text-foreground">
+                      You have been invited to join <strong className="text-primary">{invite.organizationName}</strong> as an <strong className="capitalize">{invite.role === 'org_admin' ? 'Admin' : 'Member'}</strong>.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleAcceptInvite(invite.id)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
+                  >
+                    Accept Invite
+                  </button>
+                  <button
+                    onClick={() => handleDeclineInvite(invite.id)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-secondary hover:bg-muted border border-border text-foreground transition-all cursor-pointer"
+                  >
+                    Decline
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* ======================================================== */}
         {/* 1. ORGANIZATION ADMIN PORTAL */}
         {/* ======================================================== */}
@@ -452,54 +555,103 @@ export default function UnifiedDashboard() {
 
             {/* TAB: Members */}
             {activeTab === 'members' && (
-              <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
-                <div className="px-8 py-5 border-b border-border/40 bg-card/10 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-serif text-sm font-bold">Organization Employees</h3>
-                    <p className="text-[10px] text-muted-foreground">Switch behavior templates between Recurring and Flexible.</p>
+              <div className="space-y-6 animate-fade-in">
+                {/* Active Members Table */}
+                <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
+                  <div className="px-8 py-5 border-b border-border/40 bg-card/10 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-serif text-sm font-bold">Active Members</h3>
+                      <p className="text-[10px] text-muted-foreground">Registered organization users and their configurations.</p>
+                    </div>
+                    <button
+                      onClick={() => setShowInviteModal(true)}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
+                    >
+                      <Plus className="h-4 w-4" /> Invite Member
+                    </button>
                   </div>
-                  <button
-                    onClick={() => setShowMemberModal(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
-                  >
-                    <Plus className="h-4 w-4" /> Add Employee
-                  </button>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
-                      <tr>
-                        <th className="px-8 py-4">Full Name / Email</th>
-                        <th className="px-6 py-4">Current Behavior Type</th>
-                        <th className="px-6 py-4">Access Role</th>
-                        <th className="px-8 py-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/40">
-                      {members.map((m) => (
-                        <tr key={m.id} className="hover:bg-secondary/5 transition-colors">
-                          <td className="px-8 py-4">
-                            <p className="font-bold">{m.fullName || 'No Name Provided'}</p>
-                            <p className="text-muted-foreground text-[10px]">{m.email}</p>
-                          </td>
-                          <td className="px-6 py-4 font-mono text-[10px] font-bold">
-                            <span className={m.mealBehaviorType === 'recurring' ? 'text-indigo-400' : 'text-amber-400'}>
-                              {m.mealBehaviorType.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 uppercase font-bold text-[10px]">{m.role}</td>
-                          <td className="px-8 py-4 text-right">
-                            <button
-                              onClick={() => handleToggleBehavior(m.id, m.mealBehaviorType)}
-                              className="text-xs font-bold text-accent hover:underline flex items-center gap-1 ml-auto cursor-pointer"
-                            >
-                              <ToggleLeft className="h-3.5 w-3.5" /> Toggle Behavior
-                            </button>
-                          </td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
+                        <tr>
+                          <th className="px-8 py-4">Full Name / Email</th>
+                          <th className="px-6 py-4">Current Behavior Type</th>
+                          <th className="px-6 py-4">Access Role</th>
+                          <th className="px-8 py-4 text-right">Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-border/40">
+                        {members.map((m) => (
+                          <tr key={m.id} className="hover:bg-secondary/5 transition-colors">
+                            <td className="px-8 py-4">
+                              <p className="font-bold">{m.fullName || 'No Name Provided'}</p>
+                              <p className="text-muted-foreground text-[10px]">{m.email}</p>
+                            </td>
+                            <td className="px-6 py-4 font-mono text-[10px] font-bold">
+                              <span className={m.mealBehaviorType === 'recurring' ? 'text-indigo-400' : 'text-amber-400'}>
+                                {m.mealBehaviorType.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 uppercase font-bold text-[10px]">{m.role}</td>
+                            <td className="px-8 py-4 text-right">
+                              <button
+                                onClick={() => handleToggleBehavior(m.id, m.mealBehaviorType)}
+                                className="text-xs font-bold text-accent hover:underline flex items-center gap-1 ml-auto cursor-pointer"
+                              >
+                                <ToggleLeft className="h-3.5 w-3.5" /> Toggle Behavior
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Sent Invitations List */}
+                <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
+                  <div className="px-8 py-5 border-b border-border/40 bg-card/10">
+                    <h3 className="font-serif text-sm font-bold">Sent Invitations</h3>
+                    <p className="text-[10px] text-muted-foreground">Status of pending invites sent to workspace users.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
+                        <tr>
+                          <th className="px-8 py-4">Invited Email</th>
+                          <th className="px-6 py-4">Assigned Role</th>
+                          <th className="px-6 py-4">Sent Date</th>
+                          <th className="px-8 py-4 text-right">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/40">
+                        {sentInvites.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="py-8 text-center text-muted-foreground">
+                              No active invitations sent yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          sentInvites.map((invite) => (
+                            <tr key={invite.id} className="hover:bg-secondary/5 transition-colors">
+                              <td className="px-8 py-4 font-mono font-semibold">{invite.email}</td>
+                              <td className="px-6 py-4 uppercase text-[10px] font-bold">{invite.role}</td>
+                              <td className="px-6 py-4 text-muted-foreground">
+                                {new Date(invite.createdAt).toLocaleDateString()}
+                              </td>
+                              <td className="px-8 py-4 text-right">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  invite.status === 'accepted' ? 'bg-emerald-500/10 text-emerald-400' : invite.status === 'pending' ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'
+                                }`}>
+                                  {invite.status.toUpperCase()}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}
@@ -841,65 +993,40 @@ export default function UnifiedDashboard() {
 
       </main>
 
-      {/* Member Creation Dialog Modal */}
-      {showMemberModal && (
+      {/* Invite Member Dialog Modal */}
+      {showInviteModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="glassmorphism max-w-md w-full p-8 rounded-2xl border border-accent/20 relative shadow-2xl">
-            <h3 className="font-serif text-xl font-bold mb-4">Add Organization Member</h3>
-            <form onSubmit={handleAddMember} className="space-y-4">
-              <div>
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Full Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Employee Full Name"
-                  value={newMemberName}
-                  onChange={(e) => setNewMemberName(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
-                />
-              </div>
-
+            <h3 className="font-serif text-xl font-bold mb-4">Invite Organization Member</h3>
+            <form onSubmit={handleInviteMember} className="space-y-4">
               <div>
                 <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Email Address</label>
                 <input
                   type="email"
                   required
                   placeholder="employee@corporate.com"
-                  value={newMemberEmail}
-                  onChange={(e) => setNewMemberEmail(e.target.value)}
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
                   className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Portal Role</label>
-                  <select
-                    value={newMemberRole}
-                    onChange={(e) => setNewMemberRole(e.target.value as 'org_admin' | 'org_member')}
-                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
-                  >
-                    <option value="org_member">Member (Employee)</option>
-                    <option value="org_admin">Admin (Catering Manager)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">RSVP Type</label>
-                  <select
-                    value={newMemberBehavior}
-                    onChange={(e) => setNewMemberBehavior(e.target.value as 'recurring' | 'flexible')}
-                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
-                  >
-                    <option value="flexible">Flexible (Manual RSVP)</option>
-                    <option value="recurring">Recurring (Auto-meals)</option>
-                  </select>
-                </div>
+              <div>
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Portal Role</label>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as 'org_admin' | 'org_member')}
+                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
+                >
+                  <option value="org_member">Member (Employee)</option>
+                  <option value="org_admin">Admin (Catering Manager)</option>
+                </select>
               </div>
 
               <div className="flex gap-4 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowMemberModal(false)}
+                  onClick={() => setShowInviteModal(false)}
                   className="w-1/2 py-3 rounded-xl text-xs font-bold bg-secondary hover:bg-muted border border-border transition-all"
                 >
                   Cancel
@@ -908,7 +1035,7 @@ export default function UnifiedDashboard() {
                   type="submit"
                   className="w-1/2 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 transition-all"
                 >
-                  Add Employee
+                  Send Invite
                 </button>
               </div>
             </form>

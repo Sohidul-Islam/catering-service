@@ -12,4 +12,7 @@ export * from './departments';
 export * from './office_locations';
 export * from './billing_adjustments';
 export * from './member_leaves';
+export * from './organization_members';
+export * from './invitations';
+
 

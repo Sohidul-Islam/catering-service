@@ -228,6 +228,49 @@ async function runMigration() {
       console.log('Could not add new profile columns:', e.message || e);
     }
 
+    // 16. Add is_approved column to organizations
+    try {
+      await db.execute(sql`ALTER TABLE "organizations" ADD COLUMN IF NOT EXISTS "is_approved" boolean NOT NULL DEFAULT false;`);
+      console.log('Added is_approved column to organizations.');
+    } catch (e: any) {
+      console.log('Could not add is_approved column to organizations:', e.message || e);
+    }
+
+    // 17. Create organization_members table
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS "organization_members" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+          "profile_id" text NOT NULL REFERENCES "public"."profiles"("id") ON DELETE CASCADE,
+          "organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+          "role" user_role NOT NULL DEFAULT 'org_member',
+          "created_at" timestamp DEFAULT now() NOT NULL
+        )
+      `);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_org_members_profile_org" ON "organization_members" ("profile_id", "organization_id")`);
+      console.log('organization_members table verified/created.');
+    } catch (e: any) {
+      console.log('Could not create organization_members table:', e.message || e);
+    }
+
+    // 18. Create invitations table
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS "invitations" (
+          "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+          "email" text NOT NULL,
+          "organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+          "role" user_role NOT NULL DEFAULT 'org_member',
+          "status" text NOT NULL DEFAULT 'pending',
+          "created_at" timestamp DEFAULT now() NOT NULL
+        )
+      `);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_invitations_email" ON "invitations" ("email")`);
+      console.log('invitations table verified/created.');
+    } catch (e: any) {
+      console.log('Could not create invitations table:', e.message || e);
+    }
+
     console.log('Manual database migrations completed successfully!');
     process.exit(0);
   } catch (error) {
@@ -237,3 +280,4 @@ async function runMigration() {
 }
 
 runMigration();
+
