@@ -7,6 +7,22 @@ import {
   ChefHat, Calendar, Plus, Mail, Clock, Sparkles, ToggleLeft, UserCheck, Check, X, CreditCard, ClipboardList, LogOut
 } from 'lucide-react';
 
+const format24to12 = (timeStr: string) => {
+  if (!timeStr) return '';
+  const [hourStr, minStr] = timeStr.split(':');
+  const hour = parseInt(hourStr, 10);
+  if (isNaN(hour)) return timeStr;
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${displayHour}:${minStr || '00'} ${ampm}`;
+};
+
+const formatRange24to12 = (rangeStr: string) => {
+  if (!rangeStr || !rangeStr.includes(' - ')) return rangeStr;
+  const [start, end] = rangeStr.split(' - ');
+  return `${format24to12(start)} - ${format24to12(end)}`;
+};
+
 export default function UnifiedDashboard() {
   const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'slots' | 'billing' | 'logs'>('overview');
   
@@ -518,7 +534,7 @@ export default function UnifiedDashboard() {
                       <div key={stat.slotId} className="p-4 rounded-xl bg-secondary/10 border border-border/30 space-y-3">
                         <div className="flex justify-between items-center">
                           <span className="text-xs font-bold text-accent uppercase tracking-wider">{stat.slotName}</span>
-                          <span className="text-[10px] text-muted-foreground font-mono">{stat.time}</span>
+                          <span className="text-[10px] text-muted-foreground font-mono">{formatRange24to12(stat.time)}</span>
                         </div>
                         <div className="grid grid-cols-3 gap-2 text-center">
                           <div className="bg-emerald-500/10 p-2 rounded">
@@ -741,9 +757,9 @@ export default function UnifiedDashboard() {
                       {slots.map((s) => (
                         <tr key={s.id} className="hover:bg-secondary/5 transition-colors">
                           <td className="px-8 py-4 font-bold text-foreground">{s.name}</td>
-                          <td className="px-6 py-4 text-muted-foreground font-mono">{s.startTime} - {s.endTime}</td>
+                          <td className="px-6 py-4 text-muted-foreground font-mono">{format24to12(s.startTime)} - {format24to12(s.endTime)}</td>
                           <td className="px-6 py-4">
-                            {s.confirmationDeadline} ({s.deadlineDaysAhead === 0 ? 'Same Day' : `${s.deadlineDaysAhead} Day Before`})
+                            {format24to12(s.confirmationDeadline)} ({s.deadlineDaysAhead === 0 ? 'Same Day' : `${s.deadlineDaysAhead} Day Before`})
                           </td>
                           <td className="px-6 py-4 font-bold text-accent">${s.price}</td>
                           <td className="px-8 py-4 text-right">
@@ -926,10 +942,10 @@ export default function UnifiedDashboard() {
                           <div>
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-bold text-accent uppercase tracking-wider">{conf.slot.name}</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">{conf.slot.startTime} - {conf.slot.endTime}</span>
+                              <span className="text-[10px] text-muted-foreground font-mono">{format24to12(conf.slot.startTime)} - {format24to12(conf.slot.endTime)}</span>
                             </div>
                             <span className="text-[10px] text-muted-foreground block mt-1">
-                              * Cutoff: {conf.slot.confirmationDeadline} ({conf.slot.deadlineDaysAhead === 0 ? 'Same Day' : `${conf.slot.deadlineDaysAhead} Day Before`})
+                              * Cutoff: {format24to12(conf.slot.confirmationDeadline)} ({conf.slot.deadlineDaysAhead === 0 ? 'Same Day' : `${conf.slot.deadlineDaysAhead} Day Before`})
                             </span>
                             <div className="mt-3">
                               <span className="text-xs text-muted-foreground">Status: </span>
@@ -1167,9 +1183,10 @@ export default function UnifiedDashboard() {
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 transition-all"
+                  disabled={createSlotMutation.isPending}
+                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 transition-all disabled:opacity-50"
                 >
-                  Create Slot
+                  {createSlotMutation.isPending ? 'Creating...' : 'Create Slot'}
                 </button>
               </div>
             </form>
