@@ -661,48 +661,68 @@ export default function MealManagerDashboard() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="bg-[#e6f7ed] border border-[#d1f2dd] rounded-2xl p-5 flex flex-col justify-between h-[130px] relative">
-                      <div>
-                        <span className="text-xs font-semibold text-[#1e6b3e] uppercase tracking-wider block">Meals Confirmed Today</span>
-                        <span className="text-[38px] font-bold text-[#1e6b3e] block mt-2">84</span>
+                    {/* Meals Confirmed Today */}
+                    <div className="bg-[#e6f7ed] border border-[#d1f2dd] rounded-2xl p-5 flex flex-col justify-between h-[130px]">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-xs font-semibold text-[#1e6b3e] uppercase tracking-wider block">Meals Confirmed Today</span>
+                          <span className="text-[34px] font-bold text-black block mt-1">84</span>
+                        </div>
+                        <div className="w-9 h-9 rounded-lg bg-[#3baf72] flex items-center justify-center text-white shrink-0 shadow-sm">
+                          <TrendingUp className="h-4.5 w-4.5" />
+                        </div>
                       </div>
-                      <span className="text-xs font-semibold text-[#1e6b3e]">↑ +8% vs yesterday</span>
-                      <div className="absolute right-5 top-5 w-9 h-9 rounded-full bg-[#1e6b3e] bg-opacity-10 flex items-center justify-center text-[#1e6b3e]">
-                        <TrendingUp className="h-5 w-5" />
-                      </div>
+                      <span className="text-xs font-semibold text-[#1e6b3e] flex items-center gap-1">
+                        ↑ +8% vs yesterday
+                      </span>
                     </div>
 
-                    <div className="bg-[#fef3e2] border border-[#fde3be] rounded-2xl p-5 flex flex-col justify-between h-[130px] relative">
-                      <div>
-                        <span className="text-xs font-semibold text-[#b45309] uppercase tracking-wider block">Pending Confirmations</span>
-                        <span className="text-[38px] font-bold text-[#b45309] block mt-2">12</span>
+                    {/* Pending Confirmations */}
+                    <div className="bg-[#fef3e2] border border-[#fde3be] rounded-2xl p-5 flex flex-col justify-between h-[130px]">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-xs font-semibold text-[#b45309] uppercase tracking-wider block">Pending Confirmations</span>
+                          <span className="text-[34px] font-bold text-black block mt-1">12</span>
+                        </div>
+                        <div className="w-9 h-9 rounded-lg bg-[#f59e0b] flex items-center justify-center text-white shrink-0 shadow-sm">
+                          <AlertTriangle className="h-4.5 w-4.5" />
+                        </div>
                       </div>
-                      <span className="text-xs font-semibold text-[#b45309]">Awaiting response</span>
-                      <div className="absolute right-5 top-5 w-9 h-9 rounded-full bg-[#b45309] bg-opacity-10 flex items-center justify-center text-[#b45309]">
-                        <AlertTriangle className="h-5 w-5" />
-                      </div>
+                      <span className="text-xs font-semibold text-[#b45309] flex items-center gap-1">
+                        <Clock className="h-3.5 w-3.5 text-[#b45309]" /> Awaiting response
+                      </span>
                     </div>
 
-                    <div className="bg-[#eef4ff] border border-[#dbebff] rounded-2xl p-5 flex flex-col justify-between h-[130px] relative">
-                      <div>
-                        <span className="text-xs font-semibold text-[#1e40af] uppercase tracking-wider block">Tomorrow's Meals</span>
-                        <span className="text-[38px] font-bold text-[#1e40af] block mt-2">78</span>
+                    {/* Tomorrow's Meals */}
+                    <div className="bg-[#eef4ff] border border-[#dbebff] rounded-2xl p-5 flex flex-col justify-between h-[130px]">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-xs font-semibold text-[#1e40af] uppercase tracking-wider block">Tomorrow's Meals</span>
+                          <span className="text-[34px] font-bold text-black block mt-1">78</span>
+                        </div>
+                        <div className="w-9 h-9 rounded-lg bg-[#3b82f6] flex items-center justify-center text-white shrink-0 shadow-sm">
+                          <Calendar className="h-4.5 w-4.5" />
+                        </div>
                       </div>
-                      <span className="text-xs font-semibold text-[#1e40af]">Scheduled</span>
-                      <div className="absolute right-5 top-5 w-9 h-9 rounded-full bg-[#1e40af] bg-opacity-10 flex items-center justify-center text-[#1e40af]">
-                        <Calendar className="h-5 w-5" />
-                      </div>
+                      <span className="text-xs font-semibold text-[#1e40af] flex items-center gap-1">
+                        <Calendar className="h-3.5 w-3.5 text-[#1e40af]" /> Scheduled
+                      </span>
                     </div>
 
-                    <div className="bg-[#f3e8ff] border border-[#e9d5ff] rounded-2xl p-5 flex flex-col justify-between h-[130px] relative">
-                      <div>
-                        <span className="text-xs font-semibold text-[#6b21a8] uppercase tracking-wider block">Total Active Members</span>
-                        <span className="text-[38px] font-bold text-[#6b21a8] block mt-2">102</span>
+                    {/* Total Active Members */}
+                    <div className="bg-[#f3e8ff] border border-[#e9d5ff] rounded-2xl p-5 flex flex-col justify-between h-[130px]">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-xs font-semibold text-[#6b21a8] uppercase tracking-wider block">Total Active Members</span>
+                          <span className="text-[34px] font-bold text-black block mt-1">102</span>
+                        </div>
+                        <div className="w-9 h-9 rounded-lg bg-[#a855f7] flex items-center justify-center text-white shrink-0 shadow-sm">
+                          <Users className="h-4.5 w-4.5" />
+                        </div>
                       </div>
-                      <span className="text-xs font-semibold text-[#6b21a8]">+4 this month</span>
-                      <div className="absolute right-5 top-5 w-9 h-9 rounded-full bg-[#6b21a8] bg-opacity-10 flex items-center justify-center text-[#6b21a8]">
-                        <Users className="h-5 w-5" />
-                      </div>
+                      <span className="text-xs font-semibold text-[#6b21a8] flex items-center gap-1">
+                        <Users className="h-3.5 w-3.5 text-[#6b21a8]" /> +4 this month
+                      </span>
                     </div>
                   </div>
 
