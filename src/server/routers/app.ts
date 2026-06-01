@@ -526,6 +526,15 @@ export const organizationRouter = router({
       return updated;
     }),
 
+  deleteSlot: orgAdminProcedure
+    .input(z.object({ slotId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const orgId = ctx.dbUser!.organizationId!;
+      await db.delete(mealSlots).where(and(eq(mealSlots.id, input.slotId), eq(mealSlots.organizationId, orgId)));
+      return { success: true };
+    }),
+
+
   // ── Holiday Management ───────────────────────────────────────────────────
   getHolidays: orgMemberProcedure.query(async ({ ctx }) => {
     const orgId = ctx.dbUser!.organizationId!;

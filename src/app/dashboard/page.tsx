@@ -6,7 +6,8 @@ import { trpc } from '@/utils/trpc';
 import {
   Search, Bell, ChevronDown, Calendar, AlertTriangle, Users, TrendingUp, Check, X, Settings,
   LayoutDashboard, UserCheck, ShieldAlert, Sparkles, ChefHat, ToggleLeft, Clock, CreditCard,
-  ClipboardList, LogOut, ChevronLeft, ChevronRight, Filter, Plus, Trash2, Edit3, ArrowRight, Download, FileText
+  ClipboardList, LogOut, ChevronLeft, ChevronRight, Filter, Plus, Trash2, Edit3, ArrowRight, Download, FileText,
+  Sunset, Sunrise, Coffee, Moon, Sun
 } from 'lucide-react';
 
 import {
@@ -76,6 +77,143 @@ export default function MealManagerDashboard() {
   const [notification, setNotification] = useState<string | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
 
+  // Slots Modal States
+  const [showAddSlotModal, setShowAddSlotModal] = useState(false);
+  const [newSlotName, setNewSlotName] = useState('');
+  const [newSlotIcon, setNewSlotIcon] = useState<'sunset' | 'sun' | 'coffee' | 'moon'>('sunset');
+  const [newSlotStartTime, setNewSlotStartTime] = useState('08:00 AM');
+  const [newSlotEndTime, setNewSlotEndTime] = useState('09:30 AM');
+  const [newSlotPrice, setNewSlotPrice] = useState('45');
+  const [newSlotIsActive, setNewSlotIsActive] = useState(true);
+
+  // Edit Slot States (Optional/Additional if needed)
+  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+
+  const handleCreateSlot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSlotName || !newSlotStartTime || !newSlotEndTime || !newSlotPrice) return;
+    setIsActionLoading(true);
+    try {
+      // Helper to format start / end times from AM/PM to 24h format e.g. "08:00"
+      const formatTo24h = (time12: string) => {
+        const time = time12.trim();
+        const match = time.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+        if (!match) {
+          // If already in 24h or simple HH:MM format
+          return time;
+        }
+        let [_, hrs, mins, ampm] = match;
+        let h = parseInt(hrs, 10);
+        if (ampm.toUpperCase() === 'PM' && h < 12) h += 12;
+        if (ampm.toUpperCase() === 'AM' && h === 12) h = 0;
+        return `${h.toString().padStart(2, '0')}:${mins}`;
+      };
+
+      const start24 = formatTo24h(newSlotStartTime);
+      const end24 = formatTo24h(newSlotEndTime);
+      
+      // Calculate a default deadline: 10:00 PM (22:00) or same as start24
+      const deadline = "22:00";
+
+      if (editingSlotId) {
+        await updateSlotMutation.mutateAsync({
+          slotId: editingSlotId,
+          name: newSlotName,
+          startTime: start24,
+          endTime: end24,
+          price: newSlotPrice,
+          isActive: newSlotIsActive,
+        });
+        showToast('🎉 Slot updated successfully');
+      } else {
+        await createSlotMutation.mutateAsync({
+          name: newSlotName,
+          startTime: start24,
+          endTime: end24,
+          confirmationDeadline: deadline,
+          deadlineDaysAhead: 0,
+          price: newSlotPrice,
+        });
+        showToast('🎉 Slot added');
+      }
+
+      refetchSlots();
+      setShowAddSlotModal(false);
+      setEditingSlotId(null);
+      // Reset form
+      setNewSlotName('');
+      setNewSlotIcon('sunset');
+      setNewSlotStartTime('08:00 AM');
+      setNewSlotEndTime('09:30 AM');
+      setNewSlotPrice('45');
+      setNewSlotIsActive(true);
+    } catch (err: any) {
+      showToast(`Error: ${err.message || 'Failed to save slot'}`);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleDeleteSlot = async (slotId: string) => {
+    if (!confirm('Are you sure you want to delete this meal slot?')) return;
+    setIsActionLoading(true);
+    try {
+      await deleteSlotMutation.mutateAsync({ slotId });
+      showToast('🗑️ Slot removed');
+      refetchSlots();
+    } catch (err: any) {
+      showToast(`Error: ${err.message || 'Failed to delete slot'}`);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleToggleSlotActive = async (slotId: string, currentActive: boolean) => {
+    setIsActionLoading(true);
+    try {
+      await updateSlotMutation.mutateAsync({
+        slotId,
+        isActive: !currentActive,
+      });
+      showToast(`Slot status updated`);
+      refetchSlots();
+    } catch (err: any) {
+      showToast(`Error: ${err.message || 'Failed to toggle status'}`);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleEditSlotClick = (slot: any) => {
+    // Helper to format 24h to 12h for edit form
+    const formatTo12h = (time24: string) => {
+      if (!time24) return '';
+      const [hStr, mStr] = time24.split(':');
+      let h = parseInt(hStr, 10);
+      if (isNaN(h)) return time24;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const displayHour = h % 12 === 0 ? 12 : h % 12;
+      return `${displayHour.toString().padStart(2, '0')}:${mStr || '00'} ${ampm}`;
+    };
+
+    setEditingSlotId(slot.id);
+    setNewSlotName(slot.name);
+    
+    // Determine icon based on name
+    const lower = slot.name.toLowerCase();
+    if (lower.includes('breakfast')) setNewSlotIcon('sunset');
+    else if (lower.includes('lunch')) setNewSlotIcon('sun');
+    else if (lower.includes('dinner')) setNewSlotIcon('moon');
+    else setNewSlotIcon('coffee');
+
+    setNewSlotStartTime(formatTo12h(slot.startTime));
+    setNewSlotEndTime(formatTo12h(slot.endTime));
+    setNewSlotPrice(slot.price.toString().split('.')[0]); // remove decimals if any
+    setNewSlotIsActive(slot.isActive);
+    setShowAddSlotModal(true);
+  };
+
+
   // tRPC Integrations
   const { data: dbUser, isLoading: isProfileLoading } = trpc.organization.getCurrentProfile.useQuery(undefined, {
     retry: false,
@@ -89,7 +227,7 @@ export default function MealManagerDashboard() {
     enabled: !!org,
   });
 
-  const { data: dbSlots = [] } = trpc.organization.getSlots.useQuery(undefined, {
+  const { data: dbSlots = [], refetch: refetchSlots } = trpc.organization.getSlots.useQuery(undefined, {
     enabled: !!org,
   });
 
@@ -98,6 +236,9 @@ export default function MealManagerDashboard() {
   const toggleBehaviorMutation = trpc.organization.toggleMemberBehavior.useMutation();
   const adminOverrideMutation = trpc.meal.adminOverride.useMutation();
   const confirmMealMutation = trpc.meal.confirmMeal.useMutation();
+  const createSlotMutation = trpc.organization.createSlot.useMutation();
+  const deleteSlotMutation = trpc.organization.deleteSlot.useMutation();
+  const updateSlotMutation = trpc.organization.updateSlot.useMutation();
 
   // Settings Tab Navigation Submenu
   const [settingsSubTab, setSettingsSubTab] = useState<'general' | 'slots' | 'rules' | 'notifications' | 'billing' | 'roles' | 'integrations' | 'logs'>('general');
@@ -1554,27 +1695,264 @@ export default function MealManagerDashboard() {
                       {/* MEAL SLOTS SUB-TAB PANEL */}
                       {settingsSubTab === 'slots' && (
                         <div className="space-y-6">
-                          <div>
-                            <h3 className="text-base font-bold text-[#0f172a]">Catering Operating Slots</h3>
-                            <p className="text-xs text-[#64748b]">Configure cutoff rules and pricing schedules.</p>
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h3 className="text-base font-bold text-[#0f172a]">Meal Slots</h3>
+                              <p className="text-xs text-[#64748b] mt-0.5">Add, edit, or remove meal slots and configure their pricing and schedules.</p>
+                            </div>
                           </div>
-                          <div className="space-y-4">
-                            {dbSlots.length === 0 ? (
-                              <p className="text-xs text-slate-400">Loading active slots configurations...</p>
-                            ) : (
-                              dbSlots.map((s) => (
-                                <div key={s.id} className="p-4 border rounded-xl hover:border-slate-300 transition-all flex justify-between items-center bg-slate-50">
+
+                          <div className="border border-[#eaedf0] rounded-2xl overflow-hidden bg-white">
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-xs">
+                                <thead className="text-[11px] text-[#64748b] bg-[#fafbfc] uppercase tracking-wider font-semibold border-b border-[#eaedf0]">
+                                  <tr>
+                                    <th className="px-6 py-3.5">Slot Name</th>
+                                    <th className="px-6 py-3.5">Time</th>
+                                    <th className="px-6 py-3.5">Price</th>
+                                    <th className="px-6 py-3.5">Status</th>
+                                    <th className="px-6 py-3.5 text-right">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#eaedf0] text-sm">
+                                  {dbSlots.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={5} className="px-6 py-8 text-center text-xs text-slate-400">
+                                        No active meal slots configured. Click "Add New Slot" below.
+                                      </td>
+                                    </tr>
+                                  ) : (
+                                    dbSlots.map((s) => {
+                                      // Get dynamic icon configuration based on slot name
+                                      const lowerName = s.name.toLowerCase();
+                                      let IconComponent = Coffee;
+                                      let iconColor = 'text-orange-500';
+                                      let iconBg = 'bg-orange-50';
+                                      
+                                      if (lowerName.includes('breakfast')) {
+                                        IconComponent = Sunrise;
+                                        iconColor = 'text-[#d97706]';
+                                        iconBg = 'bg-[#fffbeb]';
+                                      } else if (lowerName.includes('lunch')) {
+                                        IconComponent = Sun;
+                                        iconColor = 'text-[#0891b2]';
+                                        iconBg = 'bg-[#ecfeff]';
+                                      } else if (lowerName.includes('dinner')) {
+                                        IconComponent = Moon;
+                                        iconColor = 'text-[#4f46e5]';
+                                        iconBg = 'bg-[#eef2ff]';
+                                      } else if (lowerName.includes('snack') || lowerName.includes('tea') || lowerName.includes('coffee')) {
+                                        IconComponent = Coffee;
+                                        iconColor = 'text-[#ea580c]';
+                                        iconBg = 'bg-[#fff7ed]';
+                                      }
+
+                                      return (
+                                        <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                                          <td className="px-6 py-4 flex items-center gap-3">
+                                            <div className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}>
+                                              <IconComponent className="h-4.5 w-4.5" />
+                                            </div>
+                                            <span className="font-semibold text-[#0f172a]">{s.name}</span>
+                                          </td>
+                                          <td className="px-6 py-4 text-slate-500 font-medium">
+                                            {format24to12(s.startTime)} – {format24to12(s.endTime)}
+                                          </td>
+                                          <td className="px-6 py-4 font-bold text-slate-800">
+                                            ₹{parseFloat(s.price.toString()).toFixed(0)}
+                                          </td>
+                                          <td className="px-6 py-4">
+                                            <button
+                                              onClick={() => handleToggleSlotActive(s.id, s.isActive)}
+                                              className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all ${
+                                                s.isActive
+                                                  ? 'bg-[#e6f7ed] text-[#1e6b3e] hover:bg-green-100'
+                                                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                              }`}
+                                            >
+                                              {s.isActive ? 'Active' : 'Inactive'}
+                                            </button>
+                                          </td>
+                                          <td className="px-6 py-4 text-right space-x-2.5">
+                                            <button
+                                              onClick={() => handleEditSlotClick(s)}
+                                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-[#0f172a] transition-all"
+                                              title="Edit Slot"
+                                            >
+                                              <Edit3 className="h-4 w-4" />
+                                            </button>
+                                            <button
+                                              onClick={() => handleDeleteSlot(s.id)}
+                                              className="p-1.5 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 transition-all"
+                                              title="Delete Slot"
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            <div className="p-4 border-t border-[#eaedf0] flex justify-center bg-slate-50/50">
+                              <button
+                                onClick={() => {
+                                  setEditingSlotId(null);
+                                  setNewSlotName('');
+                                  setNewSlotIcon('sunset');
+                                  setNewSlotStartTime('08:00 AM');
+                                  setNewSlotEndTime('09:30 AM');
+                                  setNewSlotPrice('45');
+                                  setNewSlotIsActive(true);
+                                  setShowAddSlotModal(true);
+                                }}
+                                className="px-4 py-2 bg-white border border-[#e2e8f0] hover:border-slate-300 rounded-xl text-xs font-bold text-slate-800 flex items-center gap-1.5 transition-all shadow-sm cursor-pointer hover:bg-slate-50"
+                              >
+                                <Plus className="h-3.5 w-3.5" /> Add New Slot
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* MODAL OVERLAY: Add New Meal Slot */}
+                          {showAddSlotModal && (
+                            <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+                              <div className="bg-white max-w-md w-full p-8 rounded-2xl border border-slate-100 shadow-2xl relative">
+                                <button
+                                  onClick={() => setShowAddSlotModal(false)}
+                                  className="absolute top-6 right-6 p-1 text-slate-400 hover:text-black hover:bg-slate-50 rounded-lg transition-all"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+
+                                <h3 className="text-lg font-bold text-[#0f172a]">{editingSlotId ? 'Edit Meal Slot' : 'Add New Meal Slot'}</h3>
+                                <p className="text-xs text-slate-400 mt-1">Configure the slot name, schedule, and pricing.</p>
+
+                                <form onSubmit={handleCreateSlot} className="space-y-5 mt-5">
                                   <div>
-                                    <span className="font-bold text-[#0f172a] block">{s.name}</span>
-                                    <span className="text-xs text-slate-500 font-mono block mt-1">
-                                      {format24to12(s.startTime)} - {format24to12(s.endTime)} • Deadline: {format24to12(s.confirmationDeadline)}
-                                    </span>
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Slot Name</label>
+                                    <input
+                                      type="text"
+                                      required
+                                      placeholder="e.g. Late Snacks"
+                                      value={newSlotName}
+                                      onChange={(e) => setNewSlotName(e.target.value)}
+                                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-850 font-semibold"
+                                    />
                                   </div>
-                                  <span className="font-bold text-emerald-600">₹{s.price}</span>
-                                </div>
-                              ))
-                            )}
-                          </div>
+
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Icon</label>
+                                    <div className="flex gap-3">
+                                      {([
+                                        { id: 'sunset', Icon: Sunset, activeClass: 'bg-[#fffbeb] border-[#fef3c7] text-[#d97706]' },
+                                        { id: 'sun', Icon: Sun, activeClass: 'bg-[#ecfeff] border-[#cffafe] text-[#0891b2]' },
+                                        { id: 'coffee', Icon: Coffee, activeClass: 'bg-[#fff7ed] border-[#ffedd5] text-[#ea580c]' },
+                                        { id: 'moon', Icon: Moon, activeClass: 'bg-[#eef2ff] border-[#e0e7ff] text-[#4f46e5]' }
+                                      ] as const).map((item) => {
+                                        const isSelected = newSlotIcon === item.id;
+                                        const Icon = item.Icon;
+                                        return (
+                                          <button
+                                            key={item.id}
+                                            type="button"
+                                            onClick={() => setNewSlotIcon(item.id)}
+                                            className={`w-11 h-11 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${
+                                              isSelected
+                                                ? `${item.activeClass} shadow-sm border-2`
+                                                : 'bg-[#f8fafc] border-slate-100 text-slate-400 hover:bg-slate-50'
+                                            }`}
+                                          >
+                                            <Icon className="h-5 w-5" />
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Start Time</label>
+                                      <div className="relative">
+                                        <input
+                                          type="text"
+                                          required
+                                          placeholder="08:00 AM"
+                                          value={newSlotStartTime}
+                                          onChange={(e) => setNewSlotStartTime(e.target.value)}
+                                          className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                                        />
+                                        <Clock className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94a3b8]" />
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">End Time</label>
+                                      <div className="relative">
+                                        <input
+                                          type="text"
+                                          required
+                                          placeholder="09:30 AM"
+                                          value={newSlotEndTime}
+                                          onChange={(e) => setNewSlotEndTime(e.target.value)}
+                                          className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                                        />
+                                        <Clock className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94a3b8]" />
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Price (₹)</label>
+                                    <input
+                                      type="text"
+                                      required
+                                      placeholder="45"
+                                      value={newSlotPrice}
+                                      onChange={(e) => setNewSlotPrice(e.target.value)}
+                                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                                    />
+                                  </div>
+
+                                  <div className="p-4 border border-slate-100 rounded-xl flex items-center justify-between">
+                                    <div>
+                                      <label className="text-xs font-bold text-[#0f172a] block">Status</label>
+                                      <span className="text-[11px] text-slate-400 block mt-0.5">Slot is available for confirmation</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`text-xs font-bold ${newSlotIsActive ? 'text-green-600' : 'text-slate-400'}`}>
+                                        {newSlotIsActive ? 'Active' : 'Inactive'}
+                                      </span>
+                                      <input
+                                        type="checkbox"
+                                        checked={newSlotIsActive}
+                                        onChange={(e) => setNewSlotIsActive(e.target.checked)}
+                                        className="w-10 h-5 rounded-full accent-black cursor-pointer"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="flex gap-4 pt-4 border-t border-slate-100">
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowAddSlotModal(false)}
+                                      className="w-1/2 py-3 rounded-xl border border-slate-200 text-xs font-bold hover:bg-slate-50"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="submit"
+                                      disabled={isActionLoading}
+                                      className="w-1/2 py-3 rounded-xl bg-black text-white text-xs font-bold hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center gap-1"
+                                    >
+                                      {editingSlotId ? 'Save Changes' : <><Plus className="h-3.5 w-3.5" /> Add Slot</>}
+                                    </button>
+                                  </div>
+                                </form>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 
