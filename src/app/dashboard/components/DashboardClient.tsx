@@ -29,6 +29,7 @@ import {
   Filler,
 } from 'chart.js';
 import { Line as LineChart, Doughnut as DonutChart, Bar as BarChart } from 'react-chartjs-2';
+import DateRangePicker from './DateRangePicker';
 
 // Register Chart.js elements
 ChartJS.register(
@@ -78,6 +79,14 @@ export default function DashboardContent() {
   const [rsvpDate, setRsvpDate] = useState('2025-06-10'); // matching mockup date context (Jun 10, 2025)
   const [selectedMealSlot, setSelectedMealSlot] = useState<'lunch' | 'dinner'>('lunch');
   const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'pending' | 'skipped'>('all');
+
+  // ── Date Range Filters (per-tab, independent) ────────────────────────────
+  const todayStr = new Date().toISOString().split('T')[0];
+  const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+
+  const [confirmDateRange, setConfirmDateRange] = useState({ startDate: rsvpDate, endDate: rsvpDate });
+  const [reportsDateRange, setReportsDateRange] = useState({ startDate: thisMonthStart, endDate: todayStr });
+  const [billingDateRange, setBillingDateRange] = useState({ startDate: thisMonthStart, endDate: todayStr });
 
   // Modals & Dynamic Additions
   const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
@@ -895,17 +904,33 @@ export default function DashboardContent() {
 
               {/* TAB: CONFIRMATIONS PAGE */}
               {adminTab === 'confirmations' && (
-                <ConfirmationsTab
-                  rsvpDate={rsvpDate}
-                  shiftDate={shiftDate}
-                  selectedMealSlot={selectedMealSlot}
-                  setSelectedMealSlot={setSelectedMealSlot}
-                  statusFilter={statusFilter}
-                  setStatusFilter={setStatusFilter}
-                  confirmationsList={confirmationsList}
-                  handleAdminRsvpChange={handleAdminRsvpChange}
-                  handleBulkConfirm={handleBulkConfirm}
-                />
+                <div className="space-y-4">
+                  {/* Confirmations Date Range Filter */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white border border-[#eaedf0] rounded-xl px-4 py-3">
+                    <div>
+                      <h1 className="text-base font-bold text-[#0f172a]">Meal Confirmations</h1>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Showing confirmations for the selected date range.</p>
+                    </div>
+                    <DateRangePicker
+                      value={confirmDateRange}
+                      onChange={(range) => {
+                        setConfirmDateRange(range);
+                        setRsvpDate(range.startDate);
+                      }}
+                    />
+                  </div>
+                  <ConfirmationsTab
+                    rsvpDate={confirmDateRange.startDate}
+                    shiftDate={shiftDate}
+                    selectedMealSlot={selectedMealSlot}
+                    setSelectedMealSlot={setSelectedMealSlot}
+                    statusFilter={statusFilter}
+                    setStatusFilter={setStatusFilter}
+                    confirmationsList={confirmationsList}
+                    handleAdminRsvpChange={handleAdminRsvpChange}
+                    handleBulkConfirm={handleBulkConfirm}
+                  />
+                </div>
               )}
 
               {/* TAB: EMPLOYEES LIST */}
@@ -1085,21 +1110,35 @@ export default function DashboardContent() {
                     <p className="text-xs text-[#64748b]">Track meal consumption trends and generate detailed reports.</p>
                   </div>
 
-                  <div className="bg-white border border-[#eaedf0] p-4 rounded-xl flex flex-wrap gap-4 items-center justify-between">
-                    <div className="flex gap-4">
-                      <select className="px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:outline-none">
-                        <option>01 Jun 2025 - 30 Jun 2025</option>
-                      </select>
-                      <select className="px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:outline-none">
-                        <option>Report Type: Monthly</option>
-                      </select>
-                      <select className="px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:outline-none">
-                        <option>Meal Slot: All</option>
-                      </select>
+                  <div className="bg-white border border-[#eaedf0] p-4 rounded-xl flex flex-wrap gap-3 items-center justify-between">
+                    <div className="flex flex-wrap gap-3 items-center">
+                      <DateRangePicker
+                        value={reportsDateRange}
+                        onChange={setReportsDateRange}
+                        label="Date Range"
+                      />
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Meal Slot</span>
+                        <select className="px-3 py-2 border border-[#e2e8f0] rounded-xl text-xs font-semibold bg-white focus:outline-none shadow-sm h-[34px]">
+                          <option value="all">All Slots</option>
+                          <option value="breakfast">Breakfast</option>
+                          <option value="lunch">Lunch</option>
+                          <option value="dinner">Dinner</option>
+                        </select>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Report Type</span>
+                        <select className="px-3 py-2 border border-[#e2e8f0] rounded-xl text-xs font-semibold bg-white focus:outline-none shadow-sm h-[34px]">
+                          <option>Daily</option>
+                          <option>Weekly</option>
+                          <option selected>Monthly</option>
+                          <option>Custom</option>
+                        </select>
+                      </div>
                     </div>
                     <div className="flex gap-3">
-                      <button className="px-4 py-2 border rounded-xl text-xs font-bold text-[#64748b] hover:bg-slate-50">Export Excel</button>
-                      <button className="px-4 py-2 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"><Download className="h-3.5 w-3.5" /> Download PDF</button>
+                      <button className="px-4 py-2 border rounded-xl text-xs font-bold text-[#64748b] hover:bg-slate-50" onClick={() => showToast('Exporting to Excel...')}>Export Excel</button>
+                      <button className="px-4 py-2 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5" onClick={() => showToast('Generating PDF report...')}><Download className="h-3.5 w-3.5" /> Download PDF</button>
                     </div>
                   </div>
 
@@ -1210,13 +1249,17 @@ export default function DashboardContent() {
                     </div>
                   </div>
 
-                  <div className="flex justify-between items-center bg-white border border-[#eaedf0] p-4 rounded-xl text-xs font-bold">
-                    <div className="flex items-center gap-3">
-                      <ChevronLeft className="h-4 w-4 text-slate-400" />
-                      <span>June 2025</span>
-                      <ChevronRight className="h-4 w-4 text-slate-400" />
-                    </div>
-                    <span className="text-[#64748b] font-medium">Billing cycle: Jun 1 – Jun 30, 2025</span>
+                  <div className="flex flex-wrap gap-3 items-center bg-white border border-[#eaedf0] p-4 rounded-xl">
+                    <DateRangePicker
+                      value={billingDateRange}
+                      onChange={setBillingDateRange}
+                      label="Billing Period"
+                    />
+                    <span className="text-xs text-[#64748b] font-medium mt-4 md:mt-0">
+                      Showing: {new Date(billingDateRange.startDate + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      {billingDateRange.startDate !== billingDateRange.endDate &&
+                        ` – ${new Date(billingDateRange.endDate + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`}
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
