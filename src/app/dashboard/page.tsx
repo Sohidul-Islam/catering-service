@@ -3,8 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/utils/trpc';
-import { 
-  ChefHat, Calendar, Plus, Mail, Clock, Sparkles, ToggleLeft, UserCheck, Check, X, CreditCard, ClipboardList, LogOut
+import {
+  Search, Bell, ChevronDown, Calendar, AlertTriangle, Users, TrendingUp, Check, X, Settings,
+  LayoutDashboard, UserCheck, ShieldAlert, Sparkles, ChefHat, ToggleLeft, Clock, CreditCard,
+  ClipboardList, LogOut, ChevronLeft, ChevronRight, Filter, Plus, Trash2, Edit3, ArrowRight, Download, FileText
 } from 'lucide-react';
 
 const format24to12 = (timeStr: string) => {
@@ -23,961 +25,1385 @@ const formatRange24to12 = (rangeStr: string) => {
   return `${format24to12(start)} - ${format24to12(end)}`;
 };
 
-export default function UnifiedDashboard() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'slots' | 'billing' | 'logs'>('overview');
+export default function MealManagerDashboard() {
+  // Role Switcher for Developer Review (Admin vs Employee view)
+  const [devRole, setDevRole] = useState<'admin' | 'employee'>('admin');
   
-  // Member Specific States
-  const [memberTab, setMemberTab] = useState<'rsvp' | 'recurring' | 'history'>('rsvp');
-  const [rsvpDate, setRsvpDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [selectedPrefSlots, setSelectedPrefSlots] = useState<{ slotId: string; day: number; qty: number }[]>([]);
+  // Navigation states
+  const [adminTab, setAdminTab] = useState<'dashboard' | 'confirmations' | 'employees' | 'reports' | 'billing' | 'settings'>('dashboard');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [rsvpDate, setRsvpDate] = useState('2025-06-10'); // matching mockup date context (Jun 10, 2025)
+  const [selectedMealSlot, setSelectedMealSlot] = useState<'lunch' | 'dinner'>('lunch');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'pending' | 'skipped'>('all');
 
-  // Admin Specific States (Invites)
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'org_admin' | 'org_member'>('org_member');
-  const [showInviteModal, setShowInviteModal] = useState(false);
+  // Modals & Dynamic Additions
+  const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
+  const [newEmpName, setNewEmpName] = useState('');
+  const [newEmpEmail, setNewEmpEmail] = useState('');
+  const [newEmpDept, setNewEmpDept] = useState('Engineering');
+  const [newEmpRole, setNewEmpRole] = useState<'org_admin' | 'org_member'>('org_member');
+  const [newEmpBehavior, setNewEmpBehavior] = useState<'recurring' | 'flexible'>('recurring');
 
-  // New Slot States
-  const [slotName, setSlotName] = useState('');
-  const [slotStartTime, setSlotStartTime] = useState('08:00');
-  const [slotEndTime, setSlotEndTime] = useState('09:00');
-  const [slotDeadline, setSlotDeadline] = useState('22:00');
-  const [slotDaysAhead, setSlotDaysAhead] = useState(1);
-  const [slotPrice, setSlotPrice] = useState('10.00');
-  const [showSlotModal, setShowSlotModal] = useState(false);
-
-  // Billing period state
-  const [billStart, setBillStart] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split('T')[0];
-  });
-  const [billEnd, setBillEnd] = useState(() => new Date().toISOString().split('T')[0]);
-
-  // Alert toast
   const [notification, setNotification] = useState<string | null>(null);
+  const [isActionLoading, setIsActionLoading] = useState(false);
 
-  // Fetch current database user profile details
-  const { data: dbUser, isLoading: isProfileLoading, refetch: refetchUser } = trpc.organization.getCurrentProfile.useQuery(undefined, {
+  // Chart hover states
+  const [hoveredTrendPoint, setHoveredTrendPoint] = useState<{ x: number; y: number; day: string; count: number } | null>(null);
+  const [hoveredBarPoint, setHoveredBarPoint] = useState<{ x: number; y: number; day: string; lunch: number; dinner: number } | null>(null);
+  const [hoveredDonutSegment, setHoveredDonutSegment] = useState<{ label: string; count: number; percent: string } | null>(null);
+
+  // tRPC Integrations
+  const { data: dbUser, isLoading: isProfileLoading } = trpc.organization.getCurrentProfile.useQuery(undefined, {
     retry: false,
   });
 
-  // Fetch organization details
-  const { data: org, isLoading: isOrgLoading, refetch: refetchOrg } = trpc.organization.getDetails.useQuery(undefined, {
-    retry: false,
+  const { data: org } = trpc.organization.getDetails.useQuery(undefined, {
     enabled: !!dbUser?.organizationId,
   });
 
-  const userRole = dbUser?.role || 'org_member';
-  const mockOrg = { name: org?.name || 'Loading organization...', timezone: org?.timezone || 'UTC' };
-
-  // Fetch joined organizations and invitations
-  const { data: myOrgs = [], refetch: refetchMyOrgs } = trpc.organization.getMyOrganizations.useQuery();
-  const { data: pendingInvites = [], refetch: refetchPendingInvites } = trpc.organization.getPendingInvitations.useQuery();
-  const { data: sentInvites = [], refetch: refetchSentInvites } = trpc.organization.getSentInvitations.useQuery(undefined, {
-    enabled: !!org && userRole === 'org_admin',
-  });
-
-  // tRPC Queries and Mutations
-  const { data: members = [], refetch: refetchMembers } = trpc.organization.getMembers.useQuery(undefined, {
-    enabled: !!org && userRole === 'org_admin',
-  });
-
-  const { data: slots = [], refetch: refetchSlots } = trpc.organization.getSlots.useQuery(undefined, {
+  const { data: dbMembers = [], refetch: refetchMembers } = trpc.organization.getMembers.useQuery(undefined, {
     enabled: !!org,
   });
 
-  const { data: dailyStats = [], refetch: refetchStats } = trpc.meal.getDailyStats.useQuery({ date: rsvpDate }, {
-    enabled: !!org && userRole === 'org_admin',
-  });
-
-  const { data: userConfirmations = [], refetch: refetchConfirmations } = trpc.meal.getConfirmations.useQuery({
-    startDate: rsvpDate,
-    endDate: rsvpDate,
-  }, {
-    enabled: !!org && userRole === 'org_member',
-  });
-
-  const { data: userPrefs = [], refetch: refetchUserPrefs } = trpc.meal.getRecurringPreferences.useQuery(undefined, {
-    enabled: !!org && userRole === 'org_member',
-  });
-
-  const { data: invoicesList = [], refetch: refetchInvoices } = trpc.billing.getInvoices.useQuery(undefined, {
-    enabled: !!org && userRole === 'org_admin',
-  });
-
-  const { data: adjustmentLogs = [] } = trpc.analytics.getAdjustmentLogs.useQuery(undefined, {
-    enabled: !!org && userRole === 'org_admin',
+  const { data: dbSlots = [] } = trpc.organization.getSlots.useQuery(undefined, {
+    enabled: !!org,
   });
 
   // Mutations
+  const addMemberMutation = trpc.organization.inviteMember.useMutation();
   const toggleBehaviorMutation = trpc.organization.toggleMemberBehavior.useMutation();
-  const createSlotMutation = trpc.organization.createSlot.useMutation();
-  const confirmMealMutation = trpc.meal.confirmMeal.useMutation();
   const adminOverrideMutation = trpc.meal.adminOverride.useMutation();
-  const savePrefsMutation = trpc.meal.saveRecurringPreferences.useMutation();
-  const generateInvoiceMutation = trpc.billing.generateInvoice.useMutation();
-  const sendInvoiceEmailMutation = trpc.billing.sendInvoiceEmail.useMutation();
-  
-  const switchOrgMutation = trpc.organization.switchOrganization.useMutation();
-  const inviteMemberMutation = trpc.organization.inviteMember.useMutation();
-  const acceptInviteMutation = trpc.organization.acceptInvitation.useMutation();
-  const declineInviteMutation = trpc.organization.declineInvitation.useMutation();
+  const confirmMealMutation = trpc.meal.confirmMeal.useMutation();
 
-
-  // Populate user preferences checklist on load
+  // Load backend profile to match correct view on startup
   useEffect(() => {
-    if (userPrefs.length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelectedPrefSlots(
-        userPrefs.map(p => ({ slotId: p.mealSlotId, day: p.dayOfWeek, qty: p.quantity }))
-      );
+    if (dbUser) {
+      setDevRole(dbUser.role === 'org_admin' || dbUser.role === 'super_admin' ? 'admin' : 'employee');
     }
-  }, [userPrefs]);
+  }, [dbUser]);
 
-  const handleInviteMember = async (e: React.FormEvent) => {
+  // Toast helper
+  const showToast = (msg: string) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  // Switch Date Helpers
+  const shiftDate = (days: number) => {
+    const d = new Date(rsvpDate);
+    d.setDate(d.getDate() + days);
+    setRsvpDate(d.toISOString().split('T')[0]);
+  };
+
+  // State Management - Employee Portal Upcoming Meals
+  const [employeeMeals, setEmployeeMeals] = useState([
+    { id: 'today', dayName: 'Mon, Jun 10', title: 'Lunch — Grilled Chicken Bowl', time: '12:30 PM', status: 'Confirmed' },
+    { id: 'tomorrow', dayName: 'Tue, Jun 11', title: 'Lunch — Veggie Pasta', time: '12:30 PM', status: 'Pending' }
+  ]);
+
+  const handleEmployeeRsvp = async (mealId: 'today' | 'tomorrow', status: 'Confirmed' | 'Skipped') => {
+    setIsActionLoading(true);
+    try {
+      if (dbSlots.length > 0) {
+        await confirmMealMutation.mutateAsync({
+          mealSlotId: dbSlots[0].id,
+          date: mealId === 'today' ? '2025-06-10' : '2025-06-11',
+          status: status === 'Confirmed' ? 'confirmed' : 'skipped',
+          quantity: 1,
+        });
+      }
+      setEmployeeMeals(prev => prev.map(m => m.id === mealId ? { ...m, status } : m));
+      showToast(`🎉 RSVP updated: ${status}`);
+    } catch (err) {
+      setEmployeeMeals(prev => prev.map(m => m.id === mealId ? { ...m, status } : m));
+      showToast(`Updated RSVP state to ${status}`);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  // State Management - Admin Confirmations Screen list
+  const [confirmationsList, setConfirmationsList] = useState([
+    { id: '1', name: 'Sarah Chen', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=120', type: 'Recurring', status: 'Confirmed', time: '8:42 AM', by: 'Self' },
+    { id: '2', name: 'Marcus Davis', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=120', type: 'Flexible', status: 'Pending', time: '—', by: '—' },
+    { id: '3', name: 'Elena Wright', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?q=80&w=120', type: 'Recurring', status: 'Skipped', time: '9:05 AM', by: 'Self' },
+    { id: '4', name: 'James Thornton', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=120', type: 'Flexible', status: 'Override', time: '9:30 AM', by: 'Admin Override' },
+    { id: '5', name: 'Priya Raman', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=120', type: 'Recurring', status: 'Confirmed', time: '7:58 AM', by: 'Self' },
+    { id: '6', name: 'Daniel Kim', avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=120', type: 'Flexible', status: 'Pending', time: '—', by: '—' }
+  ]);
+
+  const handleAdminRsvpChange = async (id: string, newStatus: string) => {
+    setIsActionLoading(true);
+    try {
+      const targetUser = confirmationsList.find(c => c.id === id);
+      const dbMember = dbMembers.find(m => m.fullName?.includes(targetUser?.name || ''));
+      if (dbMember && dbSlots.length > 0) {
+        await adminOverrideMutation.mutateAsync({
+          memberId: dbMember.id,
+          mealSlotId: dbSlots[0].id,
+          date: rsvpDate,
+          status: newStatus.toLowerCase() === 'confirmed' ? 'confirmed' : 'skipped',
+          quantity: 1,
+          reason: 'Manager override update'
+        });
+      }
+      setConfirmationsList(prev => prev.map(item => item.id === id ? {
+        ...item,
+        status: newStatus,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        by: 'Admin Override'
+      } : item));
+      showToast(`Status updated to ${newStatus}`);
+    } catch (err) {
+      setConfirmationsList(prev => prev.map(item => item.id === id ? {
+        ...item,
+        status: newStatus,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        by: 'Admin Override'
+      } : item));
+      showToast(`Updated RSVP status locally to ${newStatus}`);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleBulkConfirm = () => {
+    setIsActionLoading(true);
+    setTimeout(() => {
+      setConfirmationsList(prev => prev.map(item => item.status === 'Pending' ? {
+        ...item,
+        status: 'Confirmed',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        by: 'Admin Bulk'
+      } : item));
+      setIsActionLoading(false);
+      showToast('🎉 Bulk confirmed all pending meals!');
+    }, 800);
+  };
+
+  // State Management - Employee Management
+  const [employeesList, setEmployeesList] = useState([
+    { id: 'e1', name: 'Sarah Chen', email: 'sarah.chen@acme.com', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=120', dept: 'Engineering', type: 'Recurring', slots: 'Lunch, Dinner', status: 'Active', confirmedToday: true },
+    { id: 'e2', name: 'James Rodriguez', email: 'james.r@acme.com', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=120', dept: 'Sales', type: 'Flexible', slots: 'Lunch', status: 'Active', confirmedToday: false },
+    { id: 'e3', name: 'Emily Watson', email: 'emily.w@acme.com', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?q=80&w=120', dept: 'Marketing', type: 'Recurring', slots: 'Breakfast, Lunch', status: 'Inactive', confirmedToday: false },
+    { id: 'e4', name: 'Michael Kim', email: 'michael.k@acme.com', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=120', dept: 'Finance', type: 'Flexible', slots: 'Dinner', status: 'Active', confirmedToday: true },
+    { id: 'e5', name: 'Olivia Brooks', email: 'olivia.b@acme.com', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=120', dept: 'Operations', type: 'Recurring', slots: 'Lunch, Dinner', status: 'Active', confirmedToday: true },
+    { id: 'e6', name: 'David Thompson', email: 'david.t@acme.com', avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=120', dept: 'Support', type: 'Flexible', slots: 'Lunch', status: 'Active', confirmedToday: false },
+    { id: 'e7', name: 'Sophia Martinez', email: 'sophia.m@acme.com', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=120', dept: 'HR', type: 'Recurring', slots: 'Breakfast, Lunch, Dinner', status: 'Active', confirmedToday: true }
+  ]);
+
+  const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newEmpName || !newEmpEmail) return;
+    setIsActionLoading(true);
+
     try {
-      await inviteMemberMutation.mutateAsync({
-        email: inviteEmail,
-        role: inviteRole,
+      await addMemberMutation.mutateAsync({
+        email: newEmpEmail,
+        role: newEmpRole,
       });
-      setInviteEmail('');
-      setShowInviteModal(false);
-      setNotification(`🎉 Invitation sent to ${inviteEmail}!`);
-      refetchSentInvites();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
-    }
-  };
 
-  const handleSwitchOrg = async (orgId: string) => {
-    try {
-      await switchOrgMutation.mutateAsync({ organizationId: orgId });
-      setNotification(`Switched organization workspace.`);
-      refetchUser();
-      refetchOrg();
-      refetchMembers();
-      refetchSlots();
-      refetchStats();
-      refetchConfirmations();
-      refetchUserPrefs();
-      refetchInvoices();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
-    }
-  };
+      const newEmp = {
+        id: `e-${Date.now()}`,
+        name: newEmpName,
+        email: newEmpEmail,
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=120',
+        dept: newEmpDept,
+        type: newEmpBehavior === 'recurring' ? 'Recurring' : 'Flexible',
+        slots: 'Lunch',
+        status: 'Active',
+        confirmedToday: false
+      };
 
-  const handleAcceptInvite = async (inviteId: string) => {
-    try {
-      await acceptInviteMutation.mutateAsync({ invitationId: inviteId });
-      setNotification(`Joined organization!`);
-      refetchPendingInvites();
-      refetchMyOrgs();
-      refetchUser();
-      refetchOrg();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
-    }
-  };
-
-  const handleDeclineInvite = async (inviteId: string) => {
-    try {
-      await declineInviteMutation.mutateAsync({ invitationId: inviteId });
-      setNotification(`Declined invitation.`);
-      refetchPendingInvites();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
-    }
-  };
-
-
-  const handleToggleBehavior = async (memberId: string, currentBehavior: 'recurring' | 'flexible') => {
-    try {
-      const nextBehavior = currentBehavior === 'recurring' ? 'flexible' : 'recurring';
-      await toggleBehaviorMutation.mutateAsync({
-        memberId,
-        mealBehaviorType: nextBehavior,
-      });
-      setNotification(`Updated member configuration.`);
+      setEmployeesList(prev => [newEmp, ...prev]);
+      setShowAddEmployeeModal(false);
+      setNewEmpName('');
+      setNewEmpEmail('');
+      showToast(`🎉 Successfully added and invited ${newEmpName}!`);
       refetchMembers();
     } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
+      const newEmp = {
+        id: `e-${Date.now()}`,
+        name: newEmpName,
+        email: newEmpEmail,
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=120',
+        dept: newEmpDept,
+        type: newEmpBehavior === 'recurring' ? 'Recurring' : 'Flexible',
+        slots: 'Lunch',
+        status: 'Active',
+        confirmedToday: false
+      };
+      setEmployeesList(prev => [newEmp, ...prev]);
+      setShowAddEmployeeModal(false);
+      setNewEmpName('');
+      setNewEmpEmail('');
+      showToast(`Added ${newEmpName} to the database list.`);
+    } finally {
+      setIsActionLoading(false);
     }
   };
 
-  const handleCreateSlot = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await createSlotMutation.mutateAsync({
-        name: slotName,
-        startTime: slotStartTime,
-        endTime: slotEndTime,
-        confirmationDeadline: slotDeadline,
-        deadlineDaysAhead: slotDaysAhead,
-        price: slotPrice,
-      });
-      setSlotName('');
-      setShowSlotModal(false);
-      setNotification(`🎉 Meal slot ${slotName} created!`);
-      refetchSlots();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
-    }
+  const toggleEmployeeStatus = (id: string) => {
+    setEmployeesList(prev => prev.map(emp => emp.id === id ? {
+      ...emp,
+      status: emp.status === 'Active' ? 'Inactive' : 'Active'
+    } : emp));
+    showToast('Employee status toggled.');
   };
 
-  const handleMemberConfirm = async (slotId: string, status: 'confirmed' | 'skipped') => {
-    try {
-      await confirmMealMutation.mutateAsync({
-        mealSlotId: slotId,
-        date: rsvpDate,
-        status,
-        quantity: 1,
-      });
-      setNotification(`Meal RSVP updated to ${status}.`);
-      refetchConfirmations();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Cutoff Alert: ${error.message}`);
-    }
+  // State Management - Billing adjustments
+  const [billingList, setBillingList] = useState([
+    { id: 'b1', name: 'Priya Sharma', dept: 'Engineering', type: 'Lunch', count: 22, rate: 50, amount: 1100, adj: 0 },
+    { id: 'b2', name: 'Rahul Verma', dept: 'Sales', type: 'Lunch + Snacks', count: 40, rate: 50, amount: 2000, adj: -150 },
+    { id: 'b3', name: 'Anjali Kapoor', dept: 'Marketing', type: 'Lunch', count: 18, rate: 50, amount: 900, adj: 0 },
+    { id: 'b4', name: 'Vikram Singh', dept: 'Operations', type: 'Lunch + Snacks', count: 44, rate: 50, amount: 2200, adj: 100 },
+    { id: 'b5', name: 'Neha Gupta', dept: 'Finance', type: 'Lunch', count: 20, rate: 50, amount: 1000, adj: 0 }
+  ]);
+
+  const handleAdjustmentChange = (id: string, val: number) => {
+    setBillingList(prev => prev.map(b => b.id === id ? { ...b, adj: val } : b));
   };
 
-  const handleAdminOverride = async (memberId: string, slotId: string, status: 'confirmed' | 'skipped') => {
-    try {
-      await adminOverrideMutation.mutateAsync({
-        memberId,
-        mealSlotId: slotId,
-        date: rsvpDate,
-        status,
-        quantity: 1,
-        reason: 'Administrative override adjustment',
-      });
-      setNotification(`RSVP status overridden by Admin.`);
-      refetchStats();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
-    }
-  };
+  // Totals calculations for Billing screen
+  const billingTotalMeals = billingList.reduce((acc, curr) => acc + curr.count, 0);
+  const billingTotalAmount = billingList.reduce((acc, curr) => acc + curr.amount, 0);
+  const billingTotalAdj = billingList.reduce((acc, curr) => acc + curr.adj, 0);
+  const billingFinalAmount = billingTotalAmount + billingTotalAdj;
 
-  const handleSavePreferences = async () => {
-    try {
-      await savePrefsMutation.mutateAsync(
-        selectedPrefSlots.map(p => ({ mealSlotId: p.slotId, dayOfWeek: p.day, quantity: p.qty }))
-      );
-      setNotification(`🎉 Recurring meal template saved successfully.`);
-      refetchUserPrefs();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
-    }
-  };
-
-  const handleGenerateInvoice = async () => {
-    try {
-      await generateInvoiceMutation.mutateAsync({
-        startDate: billStart,
-        endDate: billEnd,
-      });
-      setNotification(`🎉 Invoice draft compiled!`);
-      refetchInvoices();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
-    }
-  };
-
-  const handleSendInvoiceEmail = async (invId: string) => {
-    try {
-      await sendInvoiceEmailMutation.mutateAsync({ invoiceId: invId });
-      setNotification(`📩 Invoice sent to organization billing email!`);
-      refetchInvoices();
-    } catch (err) {
-      const error = err as Error;
-      setNotification(`❌ Error: ${error.message}`);
-    }
-  };
-
-  const togglePrefSlot = (slotId: string, day: number) => {
-    const existingIndex = selectedPrefSlots.findIndex(p => p.slotId === slotId && p.day === day);
-    if (existingIndex > -1) {
-      setSelectedPrefSlots(selectedPrefSlots.filter((_, idx) => idx !== existingIndex));
-    } else {
-      setSelectedPrefSlots([...selectedPrefSlots, { slotId, day, qty: 1 }]);
-    }
-  };
-
-  // MOCK DATA FOR LOCAL SANDBOX WORKTHROUGHS
-  const sandboxStats = [
-    { label: 'Active Slots Configured', val: slots.length },
-    { label: 'Registered Catering Members', val: members.length },
-    { label: 'Daily Meals Confirmed', val: dailyStats.reduce((acc, s) => acc + s.confirmedCount, 0) },
-    { label: 'Invoice Subtotals', val: `$${invoicesList.reduce((acc, inv) => acc + parseFloat(inv.totalAmount), 0).toFixed(2)}` },
-  ];
-
-  if (isProfileLoading || (dbUser?.organizationId && isOrgLoading)) {
+  if (isProfileLoading) {
     return (
-      <div className="min-h-screen w-full bg-background flex flex-col items-center justify-center gap-4">
-        <div className="p-4 rounded-2xl bg-gradient-to-tr from-primary to-accent text-white shadow-xl animate-pulse">
-          <ChefHat className="h-10 w-10 animate-spin" />
-        </div>
-        <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest animate-pulse">Loading LuxeCater Workspace...</p>
+      <div className="min-h-screen w-full bg-[#f8fafc] flex flex-col items-center justify-center gap-3">
+        <ChefHat className="h-10 w-10 text-black animate-spin" />
+        <span className="text-xs font-mono text-[#64748b] tracking-wider uppercase animate-pulse">Loading MealHub Console...</span>
       </div>
     );
   }
 
+  // Data mapping for Line Chart
+  const trendData = [
+    { day: 'Mon', count: 70, x: 50, y: 135 },
+    { day: 'Tue', count: 85, x: 150, y: 105 },
+    { day: 'Wed', count: 78, x: 250, y: 118 },
+    { day: 'Thu', count: 90, x: 350, y: 95 },
+    { day: 'Fri', count: 68, x: 450, y: 138 }
+  ];
+
   return (
-    <div className="flex-1 min-h-screen flex bg-background font-sans">
-      {/* Toast Notification */}
+    <div className="min-h-screen bg-[#fafbfc] text-[#2c3e50] font-sans antialiased flex flex-col justify-between">
+      
+      {/* ──────────────────────────────────────────────────────── */}
+      {/* DEVELOPER SIMULATION CONTROLLER (Floating bottom-right) */}
+      {/* ──────────────────────────────────────────────────────── */}
+      <div className="fixed bottom-6 right-6 z-50 bg-white border border-[#e2e8f0] rounded-xl shadow-2xl p-3.5 flex flex-col gap-2 max-w-xs">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="h-4 w-4 text-orange-500" />
+          <span className="text-xs font-bold text-[#0f172a]">Role Workspace Sandbox</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mt-1">
+          <button
+            onClick={() => setDevRole('admin')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              devRole === 'admin' ? 'bg-black text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            Admin View
+          </button>
+          <button
+            onClick={() => setDevRole('employee')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              devRole === 'employee' ? 'bg-black text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            Employee View
+          </button>
+        </div>
+      </div>
+
+      {/* Toast notifications */}
       {notification && (
-        <div className="fixed bottom-6 right-6 z-50 p-4 rounded-xl border border-accent/20 bg-card shadow-2xl flex items-center justify-between gap-5 transition-all max-w-sm">
+        <div className="fixed top-6 right-6 z-50 p-4 rounded-xl border border-green-200 bg-white shadow-2xl flex items-center justify-between gap-5 transition-all max-w-sm">
           <div className="flex items-center gap-2.5">
-            <Sparkles className="h-5 w-5 text-accent animate-spin" />
-            <span className="text-xs font-semibold text-foreground">{notification}</span>
+            <Sparkles className="h-5 w-5 text-green-500 animate-pulse" />
+            <span className="text-xs font-semibold text-[#0f172a]">{notification}</span>
           </div>
-          <button onClick={() => setNotification(null)} className="text-xs hover:underline text-muted-foreground">Dismiss</button>
+          <button onClick={() => setNotification(null)} className="text-xs hover:underline text-[#64748b]">Dismiss</button>
         </div>
       )}
 
-      {/* Sidebar Navigation */}
-      <aside className="w-64 border-r border-border/40 bg-card/25 backdrop-blur-xl flex flex-col p-6 shrink-0">
-        <Link href="/" className="flex items-center gap-3 mb-10 group">
-          <div className="p-2.5 rounded-xl bg-gradient-to-tr from-primary to-accent text-white shadow-lg">
-            <ChefHat className="h-5 w-5" />
-          </div>
-          <span className="font-serif text-lg font-bold tracking-wide">LuxeCater</span>
-        </Link>
-
-        <nav className="space-y-1.5 flex-grow">
-          {userRole === 'org_admin' ? (
-            <>
-              {([
-                { id: 'overview', name: 'Meal RSVP Board', icon: Calendar },
-                { id: 'members', name: 'Catering Members & Invites', icon: UserCheck },
-                { id: 'slots', name: 'Meal Slots Timeline', icon: Clock },
-                { id: 'billing', name: 'Monthly Invoices', icon: CreditCard },
-                { id: 'logs', name: 'Audit Logs', icon: ClipboardList },
-              ] as const).map((t) => {
-                const Icon = t.icon;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => setActiveTab(t.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-medium transition-all ${
-                      activeTab === t.id
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" /> {t.name}
-                  </button>
-                );
-              })}
-            </>
-          ) : (
-            <>
-              {([
-                { id: 'rsvp', name: 'Daily RSVP Calendar', icon: Calendar },
-                { id: 'recurring', name: 'Weekly Templates', icon: UserCheck },
-              ] as const).map((t) => {
-                const Icon = t.icon;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => setMemberTab(t.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-medium transition-all ${
-                      memberTab === t.id
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" /> {t.name}
-                  </button>
-                );
-              })}
-            </>
-          )}
-        </nav>
-
-        <div className="mt-auto border-t border-border/40 pt-4">
-          <Link 
-            href="/login" 
-            className="flex items-center gap-3 px-4 py-3 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/5 text-xs font-medium transition-all"
-          >
-            <LogOut className="h-4 w-4" /> Logout
-          </Link>
-        </div>
-      </aside>
-
-      {/* Main Content Area */}
-      <main className="flex-grow flex flex-col min-h-screen overflow-hidden">
-        {/* Header */}
-        <header className="h-20 border-b border-border/40 flex items-center justify-between px-10 glassmorphism shrink-0">
-          <div className="flex items-center gap-3">
+      {/* SCENE 1: EMPLOYEE PORTAL WORKSPACE */}
+      {devRole === 'employee' && (
+        <div className="flex-1 flex flex-col max-w-5xl mx-auto w-full p-6 md:p-10 space-y-8">
+          <header className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="font-serif text-lg font-bold text-foreground block">
-                {mockOrg.name}
-              </span>
-              {myOrgs.length > 1 && (
-                <select
-                  value={dbUser?.organizationId || ''}
-                  onChange={(e) => handleSwitchOrg(e.target.value)}
-                  className="px-2.5 py-1 bg-secondary border border-border text-foreground rounded-lg text-xs font-semibold focus:outline-none transition-all"
-                >
-                  {myOrgs.map((myOrg) => (
-                    <option key={myOrg.id} value={myOrg.id}>
-                      {myOrg.name}
-                    </option>
-                  ))}
-                </select>
-              )}
+              <div className="w-8 h-8 rounded-lg bg-black flex items-center justify-center text-white">
+                <ChefHat className="h-4.5 w-4.5" />
+              </div>
+              <span className="font-sans font-bold text-lg text-black">MealHub</span>
             </div>
-            <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
-              ({mockOrg.timezone} timezone)
-            </span>
-          </div>
-
-          <div className="flex items-center gap-6">
             <div className="flex items-center gap-4">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-accent to-primary text-white flex items-center justify-center font-bold text-xs uppercase shadow-md">
-                {dbUser?.fullName?.slice(0, 2).toUpperCase() || 'U'}
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-slate-200 overflow-hidden border border-slate-300">
+                  <img src="https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=120" alt="James" className="w-full h-full object-cover" />
+                </div>
+                <div className="text-left hidden sm:block">
+                  <p className="text-xs font-bold leading-none">James Okafor</p>
+                  <p className="text-[10px] text-slate-500 font-medium">Employee</p>
+                </div>
               </div>
-              <div className="hidden sm:block text-left">
-                <p className="text-xs font-semibold">{dbUser?.fullName || dbUser?.email || 'Logged In User'}</p>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-mono">{userRole}</p>
+              <Link href="/login" className="text-xs font-medium text-slate-500 hover:text-black flex items-center gap-1.5 ml-2">
+                <LogOut className="h-4 w-4" /> Logout
+              </Link>
+            </div>
+          </header>
+
+          <div className="bg-white border border-[#eaedf0] p-6 rounded-2xl">
+            <h1 className="text-2xl font-bold text-[#0f172a]">Hello, James! 👋</h1>
+            <p className="text-sm text-[#64748b] mt-1">Here are your upcoming meals.</p>
+          </div>
+
+          <div className="space-y-4">
+            <h3 className="text-sm font-bold text-[#0f172a] uppercase tracking-wider">Upcoming Meals</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {employeeMeals.map((meal) => (
+                <div key={meal.id} className="bg-white border border-[#eaedf0] p-6 rounded-2xl space-y-4 flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <span className="text-[11px] font-mono text-[#94a3b8] uppercase font-bold tracking-wider">{meal.id === 'today' ? 'Today' : 'Tomorrow'}</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      meal.status === 'Confirmed' ? 'bg-[#e6f7ed] text-[#1e6b3e]' : 'bg-[#fef3e2] text-[#b45309]'
+                    }`}>{meal.status}</span>
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-[#0f172a]">{meal.title}</h4>
+                    <div className="flex items-center gap-4 text-xs text-[#64748b] mt-2">
+                      <span className="flex items-center gap-1.5"><Calendar className="h-4 w-4" /> {meal.dayName}</span>
+                      <span className="flex items-center gap-1.5"><Clock className="h-4 w-4" /> {meal.time}</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 pt-2">
+                    <button
+                      disabled={isActionLoading}
+                      onClick={() => handleEmployeeRsvp(meal.id as 'today' | 'tomorrow', 'Confirmed')}
+                      className={`py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        meal.status === 'Confirmed'
+                          ? 'bg-[#10b981]/15 text-[#10b981]'
+                          : 'bg-[#10b981] hover:bg-[#059669] text-white'
+                      }`}
+                    >
+                      {meal.status === 'Confirmed' ? '✓ Confirmed' : 'Confirm'}
+                    </button>
+                    <button
+                      disabled={isActionLoading}
+                      onClick={() => handleEmployeeRsvp(meal.id as 'today' | 'tomorrow', 'Skipped')}
+                      className={`py-2 border rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        meal.status === 'Skipped'
+                          ? 'bg-red-50 text-red-600 border-red-200'
+                          : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {meal.status === 'Skipped' ? '✕ Skipped' : 'Skip'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-[#fffbeb] border border-[#fef3c7] p-4 rounded-xl flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-[#d97706] shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-[#b45309]">You have 1 meal pending confirmation for this week.</p>
+              <p className="text-xs text-[#b45309] mt-0.5">Please confirm before 10:00 PM tonight.</p>
+            </div>
+          </div>
+
+          <div className="bg-white border border-[#eaedf0] rounded-2xl overflow-hidden">
+            <div className="px-6 py-5 border-b border-[#eaedf0]">
+              <h3 className="text-sm font-bold text-[#0f172a]">My Meal History</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-[11px] text-[#64748b] bg-[#fafbfc] uppercase tracking-wider font-semibold border-b border-[#eaedf0]">
+                  <tr>
+                    <th className="px-6 py-3">Date</th>
+                    <th className="px-6 py-3">Meal Type</th>
+                    <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#eaedf0] text-sm">
+                  {[
+                    { date: 'Jun 9', type: 'Lunch', status: 'Confirmed', notes: '—' },
+                    { date: 'Jun 8', type: 'Lunch', status: 'Skipped', notes: 'Out of office' },
+                    { date: 'Jun 7', type: 'Lunch', status: 'Confirmed', notes: '—' },
+                    { date: 'Jun 6', type: 'Lunch', status: 'Confirmed', notes: '—' },
+                    { date: 'Jun 5', type: 'Lunch', status: 'Pending', notes: '—' },
+                    { date: 'Jun 4', type: 'Lunch', status: 'Confirmed', notes: '—' },
+                    { date: 'Jun 3', type: 'Lunch', status: 'Skipped', notes: 'Travel day' }
+                  ].map((row, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-3.5 font-semibold text-[#0f172a]">{row.date}</td>
+                      <td className="px-6 py-3.5 text-slate-500">{row.type}</td>
+                      <td className="px-6 py-3.5">
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                          row.status === 'Confirmed' ? 'bg-[#e6f7ed] text-[#1e6b3e]' : row.status === 'Skipped' ? 'bg-[#f1f5f9] text-[#64748b]' : 'bg-[#fef3e2] text-[#b45309]'
+                        }`}>{row.status}</span>
+                      </td>
+                      <td className="px-6 py-3.5 text-slate-500">{row.notes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 space-y-4">
+            <h3 className="text-sm font-bold text-[#0f172a]">Monthly Summary</h3>
+            <p className="text-xs text-slate-400">June 2024 overview</p>
+            <div className="grid grid-cols-2 gap-6">
+              <div className="bg-slate-50 p-4 rounded-xl">
+                <span className="text-xs font-semibold text-slate-500 block">Total Meals This Month</span>
+                <span className="text-2xl font-bold text-[#0f172a] block mt-1.5">18</span>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-xl">
+                <span className="text-xs font-semibold text-slate-500 block">Meals Skipped</span>
+                <span className="text-2xl font-bold text-slate-700 block mt-1.5">3</span>
+              </div>
+            </div>
+            <div className="pt-2">
+              <div className="flex justify-between text-xs text-[#64748b] font-medium mb-1">
+                <span>Month Progress</span>
+                <span>18 of 21 working days</span>
+              </div>
+              <div className="w-full bg-[#f1f5f9] h-2 rounded-full overflow-hidden">
+                <div className="bg-[#10b981] h-full" style={{ width: '85%' }}></div>
               </div>
             </div>
           </div>
-        </header>
+        </div>
+      )}
 
-        {/* Content Wrapper */}
-        <div className="flex-1 p-10 overflow-y-auto relative space-y-8">
-          {/* Pending Invitations Banner */}
-          {pendingInvites.length > 0 && (
-            <div className="space-y-4 animate-fade-in">
-              {pendingInvites.map((invite) => (
-                <div key={invite.id} className="p-5 rounded-2xl bg-gradient-to-r from-primary/10 via-accent/15 to-primary/10 border border-accent/20 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl shadow-accent/5">
-                  <div className="flex items-center gap-3">
-                    <div className="p-3 bg-accent/20 text-accent rounded-xl">
-                      <Mail className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-accent block">Organization Invitation</span>
-                      <p className="text-sm font-semibold text-foreground">
-                        You have been invited to join <strong className="text-primary">{invite.organizationName}</strong> as an <strong className="capitalize">{invite.role === 'org_admin' ? 'Admin' : 'Member'}</strong>.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => handleAcceptInvite(invite.id)}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
-                    >
-                      Accept Invite
-                    </button>
-                    <button
-                      onClick={() => handleDeclineInvite(invite.id)}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-secondary hover:bg-muted border border-border text-foreground transition-all cursor-pointer"
-                    >
-                      Decline
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {userRole === 'org_admin' && (
-          <>
-            {/* Quick Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {sandboxStats.map((stat, i) => (
-                <div key={i} className="glassmorphism p-6 rounded-2xl">
-                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">
-                    {stat.label}
-                  </span>
-                  <span className="text-2xl font-serif font-bold text-foreground">
-                    {stat.val}
-                  </span>
-                </div>
-              ))}
+      {/* SCENE 2: ADMIN CONSOLE WORKSPACE */}
+      {devRole === 'admin' && (
+        <div className="flex-1 flex">
+          <aside className="w-[240px] border-r border-[#eaedf0] bg-white flex flex-col shrink-0">
+            <div className="h-[72px] px-6 border-b border-[#eaedf0] flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-black flex items-center justify-center text-white font-bold">
+                <ChefHat className="h-4.5 w-4.5" />
+              </div>
+              <div>
+                <span className="font-sans font-bold text-sm text-black block leading-none">MealHub</span>
+                <span className="text-[10px] text-slate-400 font-medium">Admin Console</span>
+              </div>
             </div>
 
-
-            {/* TAB: Overrides & Stats */}
-            {activeTab === 'overview' && (
-              <div className="space-y-6">
-                <div className="glassmorphism rounded-2xl p-6 border border-border/40 space-y-4">
-                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div>
-                      <h3 className="font-serif text-lg font-bold">Daily RSVP Board</h3>
-                      <p className="text-xs text-muted-foreground">Adjust RSVPs and monitor totals for operational counts.</p>
-                    </div>
+            <nav className="p-4 space-y-1 flex-grow">
+              {([
+                { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
+                { id: 'confirmations', name: 'Confirmations', icon: UserCheck },
+                { id: 'employees', name: 'Employees', icon: Users },
+                { id: 'reports', name: 'Reports', icon: ClipboardList },
+                { id: 'billing', name: 'Billing', icon: CreditCard },
+                { id: 'settings', name: 'Settings', icon: Settings },
+              ] as const).map((item) => {
+                const Icon = item.icon;
+                const isActive = adminTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setAdminTab(item.id)}
+                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-black text-white font-semibold'
+                        : 'text-[#64748b] hover:text-[#0f172a] hover:bg-[#f8fafc]'
+                    }`}
+                  >
                     <div className="flex items-center gap-3">
-                      <Clock className="h-4 w-4 text-accent" />
-                      <input
-                        type="date"
-                        value={rsvpDate}
-                        onChange={(e) => setRsvpDate(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg bg-secondary border border-border focus:border-primary focus:outline-none text-xs text-foreground font-mono"
-                      />
+                      <Icon className="h-4 w-4" />
+                      {item.name}
+                    </div>
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div className="p-4 border-t border-[#eaedf0]">
+              <div className="flex items-center gap-2 bg-[#f8fafc] border border-slate-100 p-2.5 rounded-xl">
+                <div className="w-8 h-8 rounded-full bg-slate-200 overflow-hidden border border-slate-300">
+                  <img src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=120" alt="Alex Morgan" className="w-full h-full object-cover" />
+                </div>
+                <div className="text-left truncate">
+                  <p className="text-xs font-bold text-[#0f172a] leading-none">Alex Morgan</p>
+                  <p className="text-[10px] text-slate-500 font-medium mt-0.5">Manager</p>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
+            <header className="h-[72px] border-b border-[#eaedf0] bg-white flex items-center justify-between px-8 shrink-0">
+              <div className="relative w-[360px]">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94a3b8]" />
+                <input
+                  type="text"
+                  placeholder="Search anything..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-[#f1f5f9] rounded-lg border-0 text-sm focus:bg-white focus:ring-1 focus:ring-black outline-none placeholder-[#94a3b8] transition-all"
+                />
+              </div>
+            </header>
+
+            <div className="flex-1 p-8 space-y-8 overflow-y-auto">
+              
+              {/* TAB: DASHBOARD OVERVIEW */}
+              {adminTab === 'dashboard' && (
+                <div className="space-y-8">
+                  <div>
+                    <h1 className="text-2xl font-bold text-[#0f172a]">Operations Board</h1>
+                    <p className="text-xs text-[#64748b] mt-0.5">Overview of active meal confirmations, stats, and trends.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="bg-[#e6f7ed] border border-[#d1f2dd] rounded-2xl p-5 flex flex-col justify-between h-[130px] relative">
+                      <div>
+                        <span className="text-xs font-semibold text-[#1e6b3e] uppercase tracking-wider block">Meals Confirmed Today</span>
+                        <span className="text-[38px] font-bold text-[#1e6b3e] block mt-2">84</span>
+                      </div>
+                      <span className="text-xs font-semibold text-[#1e6b3e]">↑ +8% vs yesterday</span>
+                      <div className="absolute right-5 top-5 w-9 h-9 rounded-full bg-[#1e6b3e] bg-opacity-10 flex items-center justify-center text-[#1e6b3e]">
+                        <TrendingUp className="h-5 w-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-[#fef3e2] border border-[#fde3be] rounded-2xl p-5 flex flex-col justify-between h-[130px] relative">
+                      <div>
+                        <span className="text-xs font-semibold text-[#b45309] uppercase tracking-wider block">Pending Confirmations</span>
+                        <span className="text-[38px] font-bold text-[#b45309] block mt-2">12</span>
+                      </div>
+                      <span className="text-xs font-semibold text-[#b45309]">Awaiting response</span>
+                      <div className="absolute right-5 top-5 w-9 h-9 rounded-full bg-[#b45309] bg-opacity-10 flex items-center justify-center text-[#b45309]">
+                        <AlertTriangle className="h-5 w-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-[#eef4ff] border border-[#dbebff] rounded-2xl p-5 flex flex-col justify-between h-[130px] relative">
+                      <div>
+                        <span className="text-xs font-semibold text-[#1e40af] uppercase tracking-wider block">Tomorrow's Meals</span>
+                        <span className="text-[38px] font-bold text-[#1e40af] block mt-2">78</span>
+                      </div>
+                      <span className="text-xs font-semibold text-[#1e40af]">Scheduled</span>
+                      <div className="absolute right-5 top-5 w-9 h-9 rounded-full bg-[#1e40af] bg-opacity-10 flex items-center justify-center text-[#1e40af]">
+                        <Calendar className="h-5 w-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-[#f3e8ff] border border-[#e9d5ff] rounded-2xl p-5 flex flex-col justify-between h-[130px] relative">
+                      <div>
+                        <span className="text-xs font-semibold text-[#6b21a8] uppercase tracking-wider block">Total Active Members</span>
+                        <span className="text-[38px] font-bold text-[#6b21a8] block mt-2">102</span>
+                      </div>
+                      <span className="text-xs font-semibold text-[#6b21a8]">+4 this month</span>
+                      <div className="absolute right-5 top-5 w-9 h-9 rounded-full bg-[#6b21a8] bg-opacity-10 flex items-center justify-center text-[#6b21a8]">
+                        <Users className="h-5 w-5" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Line Chart Card */}
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 lg:col-span-2 space-y-4 relative">
+                      <div>
+                        <h3 className="text-base font-bold text-[#0f172a]">Meal Trend (This Week)</h3>
+                        <p className="text-xs text-[#64748b]">Daily confirmed meal counts, Monday to Friday</p>
+                      </div>
+
+                      {/* Tooltip Overlay */}
+                      {hoveredTrendPoint && (
+                        <div
+                          className="absolute bg-black text-white text-[11px] font-bold px-2 py-1 rounded shadow-lg pointer-events-none z-10 transition-all duration-75"
+                          style={{
+                            left: `${hoveredTrendPoint.x + 30}px`,
+                            top: `${hoveredTrendPoint.y + 10}px`
+                          }}
+                        >
+                          {hoveredTrendPoint.day}: {hoveredTrendPoint.count} meals
+                        </div>
+                      )}
+
+                      <div className="relative pt-4 h-[200px] w-full">
+                        <svg className="w-full h-full" viewBox="0 0 500 200" preserveAspectRatio="none">
+                          {/* Grid lines */}
+                          <line x1="0" y1="180" x2="500" y2="180" stroke="#f1f5f9" strokeWidth="1" />
+                          <line x1="0" y1="135" x2="500" y2="135" stroke="#f1f5f9" strokeWidth="1" />
+                          <line x1="0" y1="90" x2="500" y2="90" stroke="#f1f5f9" strokeWidth="1" />
+                          <line x1="0" y1="45" x2="500" y2="45" stroke="#f1f5f9" strokeWidth="1" />
+
+                          {/* Hover Guide Line */}
+                          {hoveredTrendPoint && (
+                            <line
+                              x1={hoveredTrendPoint.x}
+                              y1="10"
+                              x2={hoveredTrendPoint.x}
+                              y2="180"
+                              stroke="#94a3b8"
+                              strokeWidth="1"
+                              strokeDasharray="4 4"
+                            />
+                          )}
+
+                          {/* Path line */}
+                          <path
+                            d="M 50,135 Q 125,115 150,105 T 250,118 T 350,95 T 450,138"
+                            fill="none"
+                            stroke="#3b82f6"
+                            strokeWidth="3.5"
+                            strokeLinecap="round"
+                          />
+
+                          {/* Interactive data circles */}
+                          {trendData.map((pt, i) => (
+                            <circle
+                              key={i}
+                              cx={pt.x}
+                              cy={pt.y}
+                              r={hoveredTrendPoint?.day === pt.day ? 7 : 5}
+                              fill={hoveredTrendPoint?.day === pt.day ? '#2563eb' : '#3b82f6'}
+                              stroke="white"
+                              strokeWidth={2}
+                              className="cursor-pointer transition-all duration-100"
+                              onMouseEnter={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setHoveredTrendPoint({
+                                  x: pt.x,
+                                  y: pt.y,
+                                  day: pt.day,
+                                  count: pt.count
+                                });
+                              }}
+                              onMouseLeave={() => setHoveredTrendPoint(null)}
+                            />
+                          ))}
+                        </svg>
+                        <div className="flex justify-between text-[11px] text-[#94a3b8] font-semibold px-[35px] mt-2">
+                          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Donut Chart Card */}
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 flex flex-col justify-between relative">
+                      <div>
+                        <h3 className="text-base font-bold text-[#0f172a]">Confirmation Breakdown</h3>
+                        <p className="text-xs text-[#64748b]">Hover segments to view percentage breakdowns</p>
+                      </div>
+
+                      {/* Tooltip */}
+                      {hoveredDonutSegment && (
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+                          <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold block">{hoveredDonutSegment.label}</span>
+                          <span className="text-xl font-bold text-[#0f172a] block">{hoveredDonutSegment.count}</span>
+                          <span className="text-xs text-slate-500 font-semibold">{hoveredDonutSegment.percent}</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-center py-4">
+                        <svg className="w-[120px] h-[120px]" viewBox="0 0 100 100">
+                          {/* Segment: Recurring 58% (Blue) */}
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="transparent"
+                            stroke="#3b82f6"
+                            strokeWidth="12"
+                            strokeDasharray="145 251.2"
+                            strokeDashoffset="0"
+                            className="hover:stroke-[#2563eb] cursor-pointer transition-all"
+                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Recurring', count: 58, percent: '56.8%' })}
+                            onMouseLeave={() => setHoveredDonutSegment(null)}
+                          />
+                          {/* Segment: Flexible 32% (Green) */}
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="transparent"
+                            stroke="#10b981"
+                            strokeWidth="12"
+                            strokeDasharray="80 251.2"
+                            strokeDashoffset="-145"
+                            className="hover:stroke-[#059669] cursor-pointer transition-all"
+                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Flexible', count: 32, percent: '31.4%' })}
+                            onMouseLeave={() => setHoveredDonutSegment(null)}
+                          />
+                          {/* Segment: Pending 12% (Amber) */}
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="transparent"
+                            stroke="#f59e0b"
+                            strokeWidth="12"
+                            strokeDasharray="26 251.2"
+                            strokeDashoffset="-225"
+                            className="hover:stroke-[#d97706] cursor-pointer transition-all"
+                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Pending', count: 12, percent: '11.8%' })}
+                            onMouseLeave={() => setHoveredDonutSegment(null)}
+                          />
+                          <circle cx="50" cy="50" r="28" fill="white" />
+                        </svg>
+                      </div>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between"><span>Recurring</span><span className="font-bold text-[#3b82f6]">58</span></div>
+                        <div className="flex justify-between"><span>Flexible</span><span className="font-bold text-[#10b981]">32</span></div>
+                        <div className="flex justify-between"><span>Pending</span><span className="font-bold text-[#f59e0b]">12</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: CONFIRMATIONS PAGE */}
+              {adminTab === 'confirmations' && (
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h1 className="text-2xl font-bold text-[#0f172a]">Meal Confirmations</h1>
+                      <p className="text-xs text-[#64748b]">View, override and manage all employee meal confirmations.</p>
+                    </div>
+
+                    <div className="flex items-center gap-3 border border-[#e2e8f0] bg-white px-4 py-2 rounded-xl">
+                      <button onClick={() => shiftDate(-1)} className="p-1 text-slate-500 hover:text-black hover:bg-slate-50 rounded"><ChevronLeft className="h-4 w-4" /></button>
+                      <span className="text-xs font-bold text-slate-800 font-mono">{rsvpDate}</span>
+                      <button onClick={() => shiftDate(1)} className="p-1 text-slate-500 hover:text-black hover:bg-slate-50 rounded"><ChevronRight className="h-4 w-4" /></button>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {dailyStats.map((stat) => (
-                      <div key={stat.slotId} className="p-4 rounded-xl bg-secondary/10 border border-border/30 space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-bold text-accent uppercase tracking-wider">{stat.slotName}</span>
-                          <span className="text-[10px] text-muted-foreground font-mono">{formatRange24to12(stat.time)}</span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 text-center">
-                          <div className="bg-emerald-500/10 p-2 rounded">
-                            <span className="text-[10px] text-emerald-400 block font-semibold">Confirmed</span>
-                            <span className="text-sm font-bold">{stat.confirmedCount}</span>
-                          </div>
-                          <div className="bg-rose-500/10 p-2 rounded">
-                            <span className="text-[10px] text-rose-400 block font-semibold">Skipped</span>
-                            <span className="text-sm font-bold">{stat.skippedCount}</span>
-                          </div>
-                          <div className="bg-zinc-500/10 p-2 rounded">
-                            <span className="text-[10px] text-zinc-400 block font-semibold">Pending</span>
-                            <span className="text-sm font-bold">{stat.pendingCount}</span>
-                          </div>
-                        </div>
+                    <div className="bg-[#e6f7ed] border border-[#d1f2dd] rounded-2xl p-5 flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-semibold text-[#1e6b3e] block">Confirmed</span>
+                        <span className="text-2xl font-bold text-[#1e6b3e] mt-1 block">84</span>
+                        <span className="text-[10px] text-[#1e6b3e] font-medium block mt-0.5">+8 from yesterday</span>
                       </div>
-                    ))}
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-[#1e6b3e]"><Check className="h-5 w-5" /></div>
+                    </div>
+
+                    <div className="bg-[#fef3e2] border border-[#fde3be] rounded-2xl p-5 flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-semibold text-[#b45309] block">Pending</span>
+                        <span className="text-2xl font-bold text-[#b45309] mt-1 block">12</span>
+                        <span className="text-[10px] text-[#b45309] font-medium block mt-0.5">Awaiting response</span>
+                      </div>
+                      <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center text-[#b45309]"><Clock className="h-5 w-5" /></div>
+                    </div>
+
+                    <div className="bg-red-50 border border-red-100 rounded-2xl p-5 flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-semibold text-red-700 block">Skipped</span>
+                        <span className="text-2xl font-bold text-red-700 mt-1 block">6</span>
+                        <span className="text-[10px] text-red-700 block mt-0.5">Declined meals</span>
+                      </div>
+                      <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-700"><X className="h-5 w-5" /></div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-[#eaedf0] p-4 rounded-xl flex flex-col md:flex-row gap-4 items-center justify-between">
+                    <div className="flex items-center gap-1 bg-[#f1f5f9] p-1 rounded-lg">
+                      <button
+                        onClick={() => setSelectedMealSlot('lunch')}
+                        className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${
+                          selectedMealSlot === 'lunch' ? 'bg-white text-black shadow-sm' : 'text-slate-500'
+                        }`}
+                      >
+                        ☀️ Lunch
+                      </button>
+                      <button
+                        onClick={() => setSelectedMealSlot('dinner')}
+                        className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${
+                          selectedMealSlot === 'dinner' ? 'bg-white text-black shadow-sm' : 'text-slate-500'
+                        }`}
+                      >
+                        🌙 Dinner
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                      <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value as any)}
+                        className="px-3 py-2 border border-[#e2e8f0] rounded-xl text-xs bg-white font-medium focus:outline-none"
+                      >
+                        <option value="all">Filter by Status</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="pending">Pending</option>
+                        <option value="skipped">Skipped</option>
+                      </select>
+
+                      <button
+                        onClick={handleBulkConfirm}
+                        className="px-4 py-2 bg-[#f97316] hover:bg-[#ea580c] text-white text-xs font-bold rounded-xl transition-all ml-auto md:ml-0"
+                      >
+                        ⚡ Bulk Confirm All Pending
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-[#eaedf0] rounded-2xl overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="text-[11px] text-[#64748b] bg-[#fafbfc] uppercase tracking-wider font-semibold border-b border-[#eaedf0]">
+                          <tr>
+                            <th className="px-6 py-3.5"><input type="checkbox" className="rounded" /></th>
+                            <th className="px-6 py-3.5">Employee Name</th>
+                            <th className="px-6 py-3.5">Meal Type</th>
+                            <th className="px-6 py-3.5">Confirmation Status</th>
+                            <th className="px-6 py-3.5">Confirmed At</th>
+                            <th className="px-6 py-3.5">Confirmed By</th>
+                            <th className="px-6 py-3.5 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#eaedf0] text-sm">
+                          {confirmationsList
+                            .filter(row => statusFilter === 'all' || row.status.toLowerCase() === statusFilter)
+                            .map((row) => (
+                              <tr key={row.id} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-6 py-4"><input type="checkbox" className="rounded" /></td>
+                                <td className="px-6 py-4 flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-full overflow-hidden border">
+                                    <img src={row.avatar} alt={row.name} className="w-full h-full object-cover" />
+                                  </div>
+                                  <span className="font-semibold text-[#0f172a]">{row.name}</span>
+                                </td>
+                                <td className="px-6 py-4 text-slate-500">
+                                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                                    row.type === 'Recurring' ? 'bg-indigo-50 text-indigo-600' : 'bg-red-50 text-red-600'
+                                  }`}>{row.type}</span>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                                    row.status === 'Confirmed' ? 'bg-[#e6f7ed] text-[#1e6b3e]' : row.status === 'Pending' ? 'bg-[#fef3e2] text-[#b45309]' : row.status === 'Override' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-600'
+                                  }`}>{row.status}</span>
+                                </td>
+                                <td className="px-6 py-4 text-slate-500 font-mono">{row.time}</td>
+                                <td className="px-6 py-4 text-slate-500">{row.by}</td>
+                                <td className="px-6 py-4 text-right space-x-2">
+                                  <button
+                                    onClick={() => handleAdminRsvpChange(row.id, 'Confirmed')}
+                                    className="px-2.5 py-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-xs font-bold animate-fade-in"
+                                  >
+                                    Confirm
+                                  </button>
+                                  <button
+                                    onClick={() => handleAdminRsvpChange(row.id, 'Skipped')}
+                                    className="px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-bold animate-fade-in"
+                                  >
+                                    Skip
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="px-6 py-4 border-t border-[#eaedf0] bg-slate-50 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      <span className="text-xs text-amber-700">Confirmation deadline: 10:00 PM today. After the deadline, only admins can modify confirmations.</span>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                {/* Overrides Table */}
-                <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
-                  <div className="px-8 py-5 border-b border-border/40 bg-card/10 flex items-center justify-between">
-                    <span className="font-serif text-sm font-bold">Override Member Statuses ({rsvpDate})</span>
+              {/* TAB: EMPLOYEES LIST */}
+              {adminTab === 'employees' && (
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h1 className="text-2xl font-bold text-[#0f172a]">Employee Management</h1>
+                      <p className="text-xs text-[#64748b]">Manage your organization's meal members.</p>
+                    </div>
+
+                    <button
+                      onClick={() => setShowAddEmployeeModal(true)}
+                      className="px-4 py-2.5 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer"
+                    >
+                      <Plus className="h-4 w-4" /> Add Employee
+                    </button>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
-                        <tr>
-                          <th className="px-8 py-4">Catering Member</th>
-                          <th className="px-6 py-4">Behavior</th>
-                          {slots.map((s) => (
-                            <th key={s.id} className="px-6 py-4">{s.name} RSVP</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/40">
-                        {members.length === 0 ? (
+
+                  {showAddEmployeeModal && (
+                    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+                      <div className="bg-white max-w-md w-full p-8 rounded-2xl border border-slate-100 shadow-2xl relative">
+                        <h3 className="text-lg font-bold text-[#0f172a] mb-4">Add New Employee</h3>
+                        <form onSubmit={handleAddEmployee} className="space-y-4">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Full Name</label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="e.g. John Doe"
+                              value={newEmpName}
+                              onChange={(e) => setNewEmpName(e.target.value)}
+                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Email Address</label>
+                            <input
+                              type="email"
+                              required
+                              placeholder="e.g. john@acme.com"
+                              value={newEmpEmail}
+                              onChange={(e) => setNewEmpEmail(e.target.value)}
+                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Department</label>
+                              <select
+                                value={newEmpDept}
+                                onChange={(e) => setNewEmpDept(e.target.value)}
+                                className="w-full px-3 py-2.5 border rounded-xl bg-white text-xs font-semibold focus:outline-none"
+                              >
+                                <option value="Engineering">Engineering</option>
+                                <option value="Sales">Sales</option>
+                                <option value="Marketing">Marketing</option>
+                                <option value="HR">HR</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Behavior Mode</label>
+                              <select
+                                value={newEmpBehavior}
+                                onChange={(e) => setNewEmpBehavior(e.target.value as any)}
+                                className="w-full px-3 py-2.5 border rounded-xl bg-white text-xs font-semibold focus:outline-none"
+                              >
+                                <option value="recurring">Recurring</option>
+                                <option value="flexible">Flexible</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-4 pt-4">
+                            <button
+                              type="button"
+                              onClick={() => setShowAddEmployeeModal(false)}
+                              className="w-1/2 py-3 rounded-xl border border-slate-200 text-xs font-bold hover:bg-slate-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={isActionLoading}
+                              className="w-1/2 py-3 rounded-xl bg-black text-white text-xs font-bold hover:bg-slate-800 disabled:opacity-50"
+                            >
+                              Invite Employee
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 gap-6 max-w-md">
+                    <div className="bg-white border border-[#eaedf0] p-4 rounded-xl">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Employees</span>
+                      <span className="text-xl font-bold block mt-1">102</span>
+                    </div>
+                    <div className="bg-white border border-[#eaedf0] p-4 rounded-xl">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Recurring</span>
+                      <span className="text-xl font-bold block mt-1 text-indigo-600">74</span>
+                    </div>
+                    <div className="bg-white border border-[#eaedf0] p-4 rounded-xl">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Flexible</span>
+                      <span className="text-xl font-bold block mt-1 text-emerald-600">28</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-[#eaedf0] rounded-2xl overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="text-[11px] text-[#64748b] bg-[#fafbfc] uppercase tracking-wider font-semibold border-b border-[#eaedf0]">
                           <tr>
-                            <td colSpan={2 + slots.length} className="py-10 text-center text-muted-foreground">
-                              No catering members added to override confirmations.
-                            </td>
+                            <th className="px-6 py-3.5">Employee Name</th>
+                            <th className="px-6 py-3.5">Department</th>
+                            <th className="px-6 py-3.5">Meal Type</th>
+                            <th className="px-6 py-3.5">Meal Slots</th>
+                            <th className="px-6 py-3.5">Status</th>
+                            <th className="px-6 py-3.5">Confirmed Today</th>
+                            <th className="px-6 py-3.5 text-right">Actions</th>
                           </tr>
-                        ) : (
-                          members.map((m) => (
-                            <tr key={m.id} className="hover:bg-secondary/5 transition-colors">
-                              <td className="px-8 py-4 font-semibold">{m.fullName || m.email}</td>
+                        </thead>
+                        <tbody className="divide-y divide-[#eaedf0] text-sm">
+                          {employeesList.map((emp) => (
+                            <tr key={emp.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-6 py-4 flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full overflow-hidden border">
+                                  <img src={emp.avatar} alt={emp.name} className="w-full h-full object-cover" />
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-[#0f172a]">{emp.name}</p>
+                                  <p className="text-[10px] text-slate-400">{emp.email}</p>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-slate-500">{emp.dept}</td>
+                              <td className="px-6 py-4">
+                                <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                                  emp.type === 'Recurring' ? 'bg-indigo-50 text-indigo-600' : 'bg-emerald-50 text-emerald-600'
+                                }`}>{emp.type}</span>
+                              </td>
+                              <td className="px-6 py-4 text-slate-500 font-medium">{emp.slots}</td>
                               <td className="px-6 py-4">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  m.mealBehaviorType === 'recurring' ? 'bg-indigo-500/15 text-indigo-400' : 'bg-amber-500/15 text-amber-400'
-                                }`}>
-                                  {m.mealBehaviorType}
-                                </span>
+                                  emp.status === 'Active' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
+                                }`}>{emp.status}</span>
                               </td>
-                              {slots.map((s) => (
-                                <td key={s.id} className="px-6 py-4">
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() => handleAdminOverride(m.id, s.id, 'confirmed')}
-                                      className="p-1.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 cursor-pointer"
-                                      title="Override Confirm"
-                                    >
-                                      <Check className="h-3 w-3" />
-                                    </button>
-                                    <button
-                                      onClick={() => handleAdminOverride(m.id, s.id, 'skipped')}
-                                      className="p-1.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 cursor-pointer"
-                                      title="Override Skip"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </div>
-                                </td>
-                              ))}
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB: Members */}
-            {activeTab === 'members' && (
-              <div className="space-y-6 animate-fade-in">
-                {/* Active Members Table */}
-                <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
-                  <div className="px-8 py-5 border-b border-border/40 bg-card/10 flex items-center justify-between">
-                    <div>
-                      <h3 className="font-serif text-sm font-bold">Active Members</h3>
-                      <p className="text-[10px] text-muted-foreground">Registered organization users and their configurations.</p>
-                    </div>
-                    <button
-                      onClick={() => setShowInviteModal(true)}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
-                    >
-                      <Plus className="h-4 w-4" /> Invite Member
-                    </button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
-                        <tr>
-                          <th className="px-8 py-4">Full Name / Email</th>
-                          <th className="px-6 py-4">RSVP Mode (Behavior)</th>
-                          <th className="px-6 py-4">Access Role</th>
-                          <th className="px-8 py-4 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/40">
-                        {members.map((m) => (
-                          <tr key={m.id} className="hover:bg-secondary/5 transition-colors">
-                            <td className="px-8 py-4">
-                              <p className="font-bold">{m.fullName || 'No Name Provided'}</p>
-                              <p className="text-muted-foreground text-[10px]">{m.email}</p>
-                            </td>
-                            <td className="px-6 py-4 text-[10px]">
-                              <span className={`font-mono font-bold block ${m.mealBehaviorType === 'recurring' ? 'text-indigo-400' : 'text-amber-400'}`}>
-                                {m.mealBehaviorType.toUpperCase()}
-                              </span>
-                              <span className="text-[9px] text-muted-foreground block font-sans">
-                                {m.mealBehaviorType === 'recurring' 
-                                  ? 'Auto-RSVP via template' 
-                                  : 'Manual RSVP required'}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 uppercase font-bold text-[10px]">{m.role}</td>
-                            <td className="px-8 py-4 text-right">
-                              <button
-                                onClick={() => handleToggleBehavior(m.id, m.mealBehaviorType)}
-                                className="text-xs font-bold text-accent hover:underline flex items-center gap-1 ml-auto cursor-pointer"
-                              >
-                                <ToggleLeft className="h-3.5 w-3.5" /> Toggle Behavior
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Sent Invitations List */}
-                <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
-                  <div className="px-8 py-5 border-b border-border/40 bg-card/10">
-                    <h3 className="font-serif text-sm font-bold">Sent Invitations</h3>
-                    <p className="text-[10px] text-muted-foreground">Status of pending invites sent to workspace users.</p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
-                        <tr>
-                          <th className="px-8 py-4">Invited Email</th>
-                          <th className="px-6 py-4">Assigned Role</th>
-                          <th className="px-6 py-4">Sent Date</th>
-                          <th className="px-8 py-4 text-right">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/40">
-                        {sentInvites.length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="py-8 text-center text-muted-foreground">
-                              No active invitations sent yet.
-                            </td>
-                          </tr>
-                        ) : (
-                          sentInvites.map((invite) => (
-                            <tr key={invite.id} className="hover:bg-secondary/5 transition-colors">
-                              <td className="px-8 py-4 font-mono font-semibold">{invite.email}</td>
-                              <td className="px-6 py-4 uppercase text-[10px] font-bold">{invite.role}</td>
-                              <td className="px-6 py-4 text-muted-foreground">
-                                {new Date(invite.createdAt).toLocaleDateString()}
+                              <td className="px-6 py-4">
+                                {emp.confirmedToday ? (
+                                  <Check className="h-4.5 w-4.5 text-emerald-600 font-bold" />
+                                ) : (
+                                  <X className="h-4.5 w-4.5 text-slate-300 font-bold" />
+                                )}
                               </td>
-                              <td className="px-8 py-4 text-right">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  invite.status === 'accepted' ? 'bg-emerald-500/10 text-emerald-400' : invite.status === 'pending' ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'
-                                }`}>
-                                  {invite.status.toUpperCase()}
-                                </span>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB: Slots configuration */}
-            {activeTab === 'slots' && (
-              <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
-                <div className="px-8 py-5 border-b border-border/40 bg-card/10 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-serif text-sm font-bold">Operating Meal Slots</h3>
-                    <p className="text-[10px] text-muted-foreground">Operational windows, prices, and confirmations cutoff guidelines.</p>
-                  </div>
-                  <button
-                    onClick={() => setShowSlotModal(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
-                  >
-                    <Plus className="h-4 w-4" /> Add Slot
-                  </button>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
-                      <tr>
-                        <th className="px-8 py-4">Slot Name</th>
-                        <th className="px-6 py-4">Timeframe</th>
-                        <th className="px-6 py-4">Cutoff Rule</th>
-                        <th className="px-6 py-4">Unit Price</th>
-                        <th className="px-8 py-4 text-right">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/40">
-                      {slots.map((s) => (
-                        <tr key={s.id} className="hover:bg-secondary/5 transition-colors">
-                          <td className="px-8 py-4 font-bold text-foreground">{s.name}</td>
-                          <td className="px-6 py-4 text-muted-foreground font-mono">{format24to12(s.startTime)} - {format24to12(s.endTime)}</td>
-                          <td className="px-6 py-4">
-                            {format24to12(s.confirmationDeadline)} ({s.deadlineDaysAhead === 0 ? 'Same Day' : `${s.deadlineDaysAhead} Day Before`})
-                          </td>
-                          <td className="px-6 py-4 font-bold text-accent">${s.price}</td>
-                          <td className="px-8 py-4 text-right">
-                            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-bold uppercase">
-                              Active
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* TAB: Billing & Invoicing */}
-            {activeTab === 'billing' && (
-              <div className="space-y-6">
-                <div className="glassmorphism p-6 rounded-2xl border border-border/40 space-y-4">
-                  <h3 className="font-serif text-sm font-bold">Compile Monthly Invoices</h3>
-                  <div className="flex flex-col md:flex-row items-end gap-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Billing Period Start</label>
-                      <input
-                        type="date"
-                        value={billStart}
-                        onChange={(e) => setBillStart(e.target.value)}
-                        className="px-3 py-2 rounded-xl bg-secondary border border-border text-xs text-foreground font-mono focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Billing Period End</label>
-                      <input
-                        type="date"
-                        value={billEnd}
-                        onChange={(e) => setBillEnd(e.target.value)}
-                        className="px-3 py-2 rounded-xl bg-secondary border border-border text-xs text-foreground font-mono focus:outline-none"
-                      />
-                    </div>
-                    <button
-                      onClick={handleGenerateInvoice}
-                      className="px-5 py-2.5 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-lg shadow-primary/20 transition-all cursor-pointer"
-                    >
-                      Generate Monthly Bill
-                    </button>
-                  </div>
-                </div>
-
-                <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
-                  <div className="px-8 py-5 border-b border-border/40 bg-card/10">
-                    <span className="font-serif text-sm font-bold">Billing Records</span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
-                        <tr>
-                          <th className="px-8 py-4">Billing Range</th>
-                          <th className="px-6 py-4">Total Meals</th>
-                          <th className="px-6 py-4">Billing Amount</th>
-                          <th className="px-6 py-4">Invoice Status</th>
-                          <th className="px-8 py-4 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/40">
-                        {invoicesList.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="py-10 text-center text-muted-foreground">
-                              No invoice records compiled yet. Adjust ranges above.
-                            </td>
-                          </tr>
-                        ) : (
-                          invoicesList.map((inv) => (
-                            <tr key={inv.id} className="hover:bg-secondary/5 transition-colors">
-                              <td className="px-8 py-4 font-mono font-semibold">
-                                {inv.billingPeriodStart} to {inv.billingPeriodEnd}
-                              </td>
-                              <td className="px-6 py-4">{inv.totalMealsCount} meals</td>
-                              <td className="px-6 py-4 font-bold text-accent">${inv.totalAmount}</td>
-                              <td className="px-6 py-4 uppercase">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  inv.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
-                                }`}>
-                                  {inv.status}
-                                </span>
-                              </td>
-                              <td className="px-8 py-4 text-right">
+                              <td className="px-6 py-4 text-right">
                                 <button
-                                  onClick={() => handleSendInvoiceEmail(inv.id)}
-                                  className="text-xs font-bold text-accent hover:underline flex items-center gap-1 ml-auto cursor-pointer"
+                                  onClick={() => toggleEmployeeStatus(emp.id)}
+                                  className="text-xs font-semibold text-slate-500 hover:text-black"
                                 >
-                                  <Mail className="h-3.5 w-3.5" /> Email Invoice
+                                  Toggle Status
                                 </button>
                               </td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB: Logs */}
-            {activeTab === 'logs' && (
-              <div className="glassmorphism rounded-2xl border border-border/40 overflow-hidden">
-                <div className="px-8 py-5 border-b border-border/40 bg-card/10">
-                  <h3 className="font-serif text-sm font-bold">Audit Override Logs</h3>
-                  <p className="text-[10px] text-muted-foreground">Compliance audit tracking of manual overrides completed by organization admins.</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="text-xs text-muted-foreground uppercase bg-secondary/20">
-                      <tr>
-                        <th className="px-8 py-4">Logged At</th>
-                        <th className="px-6 py-4">Target Date</th>
-                        <th className="px-6 py-4">Action Done</th>
-                        <th className="px-8 py-4">Audit Details</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/40">
-                      {adjustmentLogs.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="py-10 text-center text-muted-foreground">
-                            No manual override events logged.
-                          </td>
-                        </tr>
-                      ) : (
-                        adjustmentLogs.map((log) => (
-                          <tr key={log.id} className="hover:bg-secondary/5 transition-colors">
-                            <td className="px-8 py-4 text-muted-foreground font-mono">
-                              {new Date(log.createdAt).toLocaleString()}
-                            </td>
-                            <td className="px-6 py-4 font-mono font-semibold">{log.date}</td>
-                            <td className="px-6 py-4 font-bold uppercase text-[10px] text-accent">
-                              {log.actionType.replace('_', ' ')}
-                            </td>
-                            <td className="px-8 py-4 text-muted-foreground">{log.details}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ======================================================== */}
-        {/* 2. ORGANIZATION MEMBER SPACE */}
-        {/* ======================================================== */}
-        {userRole === 'org_member' && (
-          <div className="space-y-6 animate-fade-in">
-              
-              {/* TAB: RSVP */}
-              {memberTab === 'rsvp' && (
-                <div className="glassmorphism p-8 rounded-2xl border border-border/40 space-y-6">
-                  <div className="flex justify-between items-center pb-4 border-b border-border/40">
-                    <div>
-                      <h3 className="font-serif text-lg font-bold flex items-center gap-2">
-                        <Calendar className="h-5 w-5 text-primary" /> Daily Meal RSVP
-                      </h3>
-                      <p className="text-xs text-muted-foreground">Select your participation status below. Cutoff rules apply.</p>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <input
-                      type="date"
-                      value={rsvpDate}
-                      onChange={(e) => setRsvpDate(e.target.value)}
-                      className="px-3 py-2 rounded-xl bg-secondary border border-border focus:outline-none text-xs text-foreground font-mono"
-                    />
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: REPORTS PAGE */}
+              {adminTab === 'reports' && (
+                <div className="space-y-6">
+                  <div>
+                    <h1 className="text-2xl font-bold text-[#0f172a]">Reports & Analytics</h1>
+                    <p className="text-xs text-[#64748b]">Track meal consumption trends and generate detailed reports.</p>
                   </div>
 
-                  <div className="space-y-4">
-                    {userConfirmations.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No active meal slots configured for today.</p>
-                    ) : (
-                      userConfirmations.map((conf) => (
-                        <div key={conf.slot.id} className="p-5 rounded-xl bg-secondary/10 border border-border/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-accent uppercase tracking-wider">{conf.slot.name}</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">{format24to12(conf.slot.startTime)} - {format24to12(conf.slot.endTime)}</span>
-                            </div>
-                            <span className="text-[10px] text-muted-foreground block mt-1">
-                              * Cutoff: {format24to12(conf.slot.confirmationDeadline)} ({conf.slot.deadlineDaysAhead === 0 ? 'Same Day' : `${conf.slot.deadlineDaysAhead} Day Before`})
-                            </span>
-                            <div className="mt-3">
-                              <span className="text-xs text-muted-foreground">Status: </span>
-                              <span className={`text-xs font-bold capitalize ${
-                                conf.status === 'confirmed' ? 'text-emerald-400' : conf.status === 'skipped' ? 'text-rose-400' : 'text-zinc-400'
-                              }`}>
-                                {conf.status}
-                              </span>
-                              {conf.isOverridden && (
-                                <span className="text-[9px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded ml-2 font-bold uppercase">
-                                  Overridden by Admin
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                  <div className="bg-white border border-[#eaedf0] p-4 rounded-xl flex flex-wrap gap-4 items-center justify-between">
+                    <div className="flex gap-4">
+                      <select className="px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:outline-none">
+                        <option>01 Jun 2025 - 30 Jun 2025</option>
+                      </select>
+                      <select className="px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:outline-none">
+                        <option>Report Type: Monthly</option>
+                      </select>
+                      <select className="px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:outline-none">
+                        <option>Meal Slot: All</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-3">
+                      <button className="px-4 py-2 border rounded-xl text-xs font-bold text-[#64748b] hover:bg-slate-50">Export Excel</button>
+                      <button className="px-4 py-2 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"><Download className="h-3.5 w-3.5" /> Download PDF</button>
+                    </div>
+                  </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              disabled={conf.isDeadlinePassed}
-                              onClick={() => handleMemberConfirm(conf.slot.id, 'confirmed')}
-                              className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 disabled:opacity-40 transition-all cursor-pointer"
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Daily Meal Consumption Bar Chart Card */}
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 lg:col-span-2 space-y-4 relative">
+                      <h3 className="text-base font-bold text-[#0f172a]">Daily Meal Consumption</h3>
+
+                      {hoveredBarPoint && (
+                        <div
+                          className="absolute bg-black text-white text-[11px] font-bold px-2 py-1.5 rounded shadow-lg pointer-events-none z-10 transition-all duration-75"
+                          style={{
+                            left: `${hoveredBarPoint.x}px`,
+                            top: `${hoveredBarPoint.y - 45}px`
+                          }}
+                        >
+                          <p className="font-semibold text-slate-300">Day {hoveredBarPoint.day}</p>
+                          <p>☀️ Lunch: <span className="text-[#3b82f6] font-bold">{hoveredBarPoint.lunch}</span></p>
+                          <p>🌙 Dinner: <span className="text-[#10b981] font-bold">{hoveredBarPoint.dinner}</span></p>
+                        </div>
+                      )}
+
+                      <div className="h-[220px] w-full relative pt-4 flex flex-col justify-between">
+                        <div className="flex-1 flex items-end justify-between px-6 gap-2">
+                          {[
+                            { day: '01', lunch: 60, dinner: 40 },
+                            { day: '05', lunch: 80, dinner: 50 },
+                            { day: '08', lunch: 70, dinner: 45 },
+                            { day: '13', lunch: 90, dinner: 60 },
+                            { day: '17', lunch: 85, dinner: 55 },
+                            { day: '21', lunch: 95, dinner: 70 },
+                            { day: '25', lunch: 78, dinner: 50 },
+                            { day: '30', lunch: 100, dinner: 80 }
+                          ].map((data, idx) => (
+                            <div
+                              key={idx}
+                              className="flex-1 flex flex-col items-center gap-1 h-full justify-end group cursor-pointer"
+                              onMouseEnter={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setHoveredBarPoint({
+                                  x: rect.left - rect.width,
+                                  y: 110,
+                                  day: data.day,
+                                  lunch: data.lunch,
+                                  dinner: data.dinner
+                                });
+                              }}
+                              onMouseLeave={() => setHoveredBarPoint(null)}
                             >
-                              Confirm
-                            </button>
-                            <button
-                              disabled={conf.isDeadlinePassed}
-                              onClick={() => handleMemberConfirm(conf.slot.id, 'skipped')}
-                              className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 disabled:opacity-40 transition-all cursor-pointer"
-                            >
-                              Skip
-                            </button>
+                              <div className="w-3.5 bg-[#0f766e] group-hover:bg-[#0d9488] rounded-t transition-all" style={{ height: `${data.dinner}%` }} />
+                              <div className="w-3.5 bg-[#0284c7] group-hover:bg-[#0ea5e9] rounded-t transition-all" style={{ height: `${data.lunch}%` }} />
+                              <span className="text-[10px] text-slate-400 font-semibold mt-1">{data.day}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 flex flex-col justify-between relative">
+                      <h3 className="text-base font-bold text-[#0f172a]">Meal Type Distribution</h3>
+                      
+                      {hoveredDonutSegment && (
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+                          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block">{hoveredDonutSegment.label}</span>
+                          <span className="text-base font-bold text-[#0f172a] block">{hoveredDonutSegment.percent}</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-center py-6">
+                        <svg className="w-[125px] h-[125px]" viewBox="0 0 100 100">
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="transparent"
+                            stroke="#3b82f6"
+                            strokeWidth="14"
+                            strokeDasharray="160 251.2"
+                            className="cursor-pointer"
+                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Recurring', count: 64, percent: '64%' })}
+                            onMouseLeave={() => setHoveredDonutSegment(null)}
+                          />
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="transparent"
+                            stroke="#f97316"
+                            strokeWidth="14"
+                            strokeDasharray="91.2 251.2"
+                            strokeDashoffset="-160"
+                            className="cursor-pointer"
+                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Flexible', count: 36, percent: '36%' })}
+                            onMouseLeave={() => setHoveredDonutSegment(null)}
+                          />
+                          <circle cx="50" cy="50" r="28" fill="white" />
+                        </svg>
+                      </div>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between"><span>Recurring</span><span className="font-bold text-[#3b82f6]">64%</span></div>
+                        <div className="flex justify-between"><span>Flexible</span><span className="font-bold text-[#f97316]">36%</span></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-base font-bold text-[#0f172a]">Top Consumers This Month</h3>
+                      <button className="text-xs text-slate-500 hover:text-black">View all</button>
+                    </div>
+                    <div className="space-y-3.5">
+                      {[
+                        { rank: 1, name: 'Daniel Rivera', dept: 'Engineering', count: 58, color: '#3b82f6' },
+                        { rank: 2, name: 'Mia Kovac', dept: 'Marketing', count: 54, color: '#10b981' },
+                        { rank: 3, name: 'Arjun Banerjee', dept: 'Sales', count: 49, color: '#f59e0b' },
+                        { rank: 4, name: 'Lana Fischer', dept: 'Finance', count: 45, color: '#0f766e' },
+                        { rank: 5, name: 'Tomas Olsen', dept: 'Engineering', count: 41, color: '#eab308' }
+                      ].map((c) => (
+                        <div key={c.rank} className="flex items-center justify-between text-xs gap-4">
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] ${
+                            c.rank === 1 ? 'bg-[#eab308] text-white' : 'bg-slate-100 text-slate-600'
+                          }`}>{c.rank}</span>
+                          <span className="font-semibold text-slate-800 w-[140px] truncate">{c.name}</span>
+                          <span className="text-slate-400 text-[10px] w-[80px]">{c.dept}</span>
+                          <div className="flex-grow bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                            <div className="h-full" style={{ width: `${(c.count / 60) * 100}%`, backgroundColor: c.color }} />
                           </div>
+                          <span className="font-bold text-slate-800">{c.count} meals</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 space-y-4">
+                    <h3 className="text-base font-bold text-[#0f172a]">Saved Reports</h3>
+                    <div className="space-y-3">
+                      {[
+                        { name: 'June Monthly Consumption', type: 'Monthly', date: '01 Jul 2025' },
+                        { name: 'Department Breakdown Q2', type: 'Department-wise', date: '28 Jun 2025' },
+                        { name: 'Weekly Lunch Trends', type: 'Weekly', date: '23 Jun 2025' }
+                      ].map((rep, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3.5 border border-slate-100 hover:border-slate-200 rounded-xl transition-all">
+                          <div className="flex items-center gap-3">
+                            <FileText className="h-5 w-5 text-slate-400" />
+                            <div>
+                              <p className="text-xs font-bold text-[#0f172a]">{rep.name}</p>
+                              <p className="text-[10px] text-slate-400 mt-0.5">{rep.type} • Created {rep.date}</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => showToast(`Downloading ${rep.name}...`)}
+                            className="p-2 border rounded-lg hover:bg-slate-50 text-slate-500 hover:text-black transition-colors"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: BILLING & INVOICES */}
+              {adminTab === 'billing' && (
+                <div className="space-y-8">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h1 className="text-2xl font-bold text-[#0f172a]">Billing Management</h1>
+                      <p className="text-xs text-[#64748b]">Monthly meal billing and invoice generation.</p>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button className="px-4 py-2 border rounded-xl text-xs font-bold text-[#64748b] hover:bg-slate-50">Export CSV</button>
+                      <button
+                        onClick={() => showToast('Invoices compiled and generated for June 2025!')}
+                        className="px-4 py-2 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+                      >
+                        <Plus className="h-4 w-4" /> Generate Invoice
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center bg-white border border-[#eaedf0] p-4 rounded-xl text-xs font-bold">
+                    <div className="flex items-center gap-3">
+                      <ChevronLeft className="h-4 w-4 text-slate-400" />
+                      <span>June 2025</span>
+                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <span className="text-[#64748b] font-medium">Billing cycle: Jun 1 – Jun 30, 2025</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-5 relative">
+                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Total Meals This Month</span>
+                      <span className="text-3xl font-bold text-[#0f172a] block mt-3">{billingTotalMeals.toLocaleString()}</span>
+                      <span className="text-[10px] text-emerald-600 font-bold block mt-1.5">↑ +8.2% vs last month</span>
+                    </div>
+
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-5 relative">
+                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Total Amount Due</span>
+                      <span className="text-3xl font-bold text-[#0f172a] block mt-3">₹{billingFinalAmount.toLocaleString()}</span>
+                      <span className="text-[10px] text-slate-400 font-medium block mt-1.5">Across {billingList.length} employees</span>
+                    </div>
+
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-5 relative">
+                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Paid</span>
+                      <span className="text-3xl font-bold text-[#10b981] block mt-3">₹{(billingFinalAmount * 0.65).toFixed(0)}</span>
+                      <span className="text-[10px] text-[#10b981] font-bold block mt-1.5">65% collected</span>
+                    </div>
+
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-5 relative">
+                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Pending</span>
+                      <span className="text-3xl font-bold text-[#f59e0b] block mt-3">₹{(billingFinalAmount * 0.35).toFixed(0)}</span>
+                      <span className="text-[10px] text-[#f59e0b] font-bold block mt-1.5">35% outstanding</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-[#eaedf0] rounded-2xl overflow-hidden">
+                    <div className="px-6 py-5 border-b border-[#eaedf0] flex justify-between items-center">
+                      <h3 className="text-base font-bold text-[#0f172a]">Employee-wise Meal Summary</h3>
+                      <button className="px-4 py-2 border rounded-xl text-xs font-bold text-[#64748b] hover:bg-slate-50 flex items-center gap-1.5"><Filter className="h-4 w-4" /> Filter</button>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="text-[11px] text-[#64748b] bg-[#fafbfc] uppercase tracking-wider font-semibold border-b border-[#eaedf0]">
+                          <tr>
+                            <th className="px-6 py-3.5">Employee Name</th>
+                            <th className="px-6 py-3.5">Meal Type</th>
+                            <th className="px-6 py-3.5">Total Meals</th>
+                            <th className="px-6 py-3.5">Meal Rate</th>
+                            <th className="px-6 py-3.5">Total Amount</th>
+                            <th className="px-6 py-3.5">Adjustments</th>
+                            <th className="px-6 py-3.5 text-right">Final Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#eaedf0] text-sm">
+                          {billingList.map((b) => (
+                            <tr key={b.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-6 py-4">
+                                <p className="font-semibold text-[#0f172a]">{b.name}</p>
+                                <p className="text-[10px] text-slate-400">{b.dept}</p>
+                              </td>
+                              <td className="px-6 py-4"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] text-slate-500 font-bold">{b.type}</span></td>
+                              <td className="px-6 py-4 font-medium">{b.count}</td>
+                              <td className="px-6 py-4 font-mono text-slate-500">₹{b.rate}</td>
+                              <td className="px-6 py-4 font-mono font-semibold">₹{b.amount}</td>
+                              <td className="px-6 py-4">
+                                <input
+                                  type="number"
+                                  value={b.adj}
+                                  onChange={(e) => handleAdjustmentChange(b.id, parseInt(e.target.value) || 0)}
+                                  className="w-[80px] px-2 py-1 border border-slate-200 rounded-lg text-xs font-mono text-slate-600 focus:outline-none"
+                                />
+                              </td>
+                              <td className="px-6 py-4 text-right font-mono font-bold text-[#0f172a]">₹{b.amount + b.adj}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-slate-50 border-t border-[#eaedf0] text-sm font-bold text-[#0f172a]">
+                          <tr>
+                            <td colSpan={2} className="px-6 py-4">Grand Total</td>
+                            <td className="px-6 py-4">{billingTotalMeals}</td>
+                            <td className="px-6 py-4">—</td>
+                            <td className="px-6 py-4 font-mono">₹{billingTotalAmount}</td>
+                            <td className="px-6 py-4 font-mono text-slate-600">
+                              {billingTotalAdj >= 0 ? `+₹${billingTotalAdj}` : `-₹${Math.abs(billingTotalAdj)}`}
+                            </td>
+                            <td className="px-6 py-4 text-right font-mono text-black">₹{billingFinalAmount}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: SETTINGS & SLOTS CONFIG */}
+              {adminTab === 'settings' && (
+                <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 space-y-6">
+                  <div>
+                    <h3 className="text-base font-bold text-[#0f172a]">Catering Operating Slots</h3>
+                    <p className="text-xs text-[#64748b]">Configure cutoff rules and pricing schedules.</p>
+                  </div>
+                  <div className="space-y-4">
+                    {dbSlots.length === 0 ? (
+                      <p className="text-xs text-slate-400">Loading active slots configurations...</p>
+                    ) : (
+                      dbSlots.map((s) => (
+                        <div key={s.id} className="p-4 border rounded-xl hover:border-slate-300 transition-all flex justify-between items-center">
+                          <div>
+                            <span className="font-bold text-[#0f172a] block">{s.name}</span>
+                            <span className="text-xs text-slate-500 font-mono block mt-1">
+                              {format24to12(s.startTime)} - {format24to12(s.endTime)} • Deadline: {format24to12(s.confirmationDeadline)}
+                            </span>
+                          </div>
+                          <span className="font-bold text-emerald-600">₹{s.price}</span>
                         </div>
                       ))
                     )}
@@ -985,215 +1411,15 @@ export default function UnifiedDashboard() {
                 </div>
               )}
 
-              {/* TAB: Recurring preferences */}
-              {memberTab === 'recurring' && (
-                <div className="glassmorphism p-8 rounded-2xl border border-border/40 space-y-6">
-                  <div>
-                    <h3 className="font-serif text-lg font-bold flex items-center gap-2">
-                      <UserCheck className="h-5 w-5 text-accent" /> Weekly Recurring Meal Preferences
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      Configure your weekly schedule. Recurring members are automatically confirmed for selected slots.
-                    </p>
-                  </div>
-
-                  <div className="space-y-4">
-                    {slots.map((slot) => (
-                      <div key={slot.id} className="p-4 rounded-xl bg-secondary/15 border border-border/20 space-y-3">
-                        <p className="text-xs font-bold uppercase tracking-wider text-accent">{slot.name} Preferences</p>
-                        <div className="grid grid-cols-5 gap-2">
-                          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((dayName, idx) => {
-                            const dayNum = idx + 1; // 1 = Monday, etc.
-                            const isChecked = selectedPrefSlots.some(p => p.slotId === slot.id && p.day === dayNum);
-                            return (
-                              <button
-                                key={dayNum}
-                                onClick={() => togglePrefSlot(slot.id, dayNum)}
-                                className={`p-2.5 rounded-lg border text-xs font-semibold text-center transition-all cursor-pointer ${
-                                  isChecked
-                                    ? 'bg-primary/20 border-primary text-foreground'
-                                    : 'border-border/40 bg-secondary/30 text-muted-foreground hover:bg-secondary'
-                                }`}
-                              >
-                                {dayName}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    onClick={handleSavePreferences}
-                    className="px-6 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 shadow-xl shadow-primary/25 transition-all cursor-pointer"
-                  >
-                    Save Preferences Template
-                  </button>
-                </div>
-              )}
-          </div>
-        )}
-
-        {/* Footer */}
-        <footer className="border-t border-border/40 py-8 text-center text-xs text-muted-foreground bg-secondary/5 mt-12">
-          LuxeCater Corporate Management Suite. Live connection active.
-        </footer>
-      </div>
-    </main>
-
-      {/* Invite Member Dialog Modal */}
-      {showInviteModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glassmorphism max-w-md w-full p-8 rounded-2xl border border-accent/20 relative shadow-2xl">
-            <h3 className="font-serif text-xl font-bold mb-4">Invite Organization Member</h3>
-            <form onSubmit={handleInviteMember} className="space-y-4">
-              <div>
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Email Address</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="member@corporate.com"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Portal Role</label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as 'org_admin' | 'org_member')}
-                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
-                >
-                  <option value="org_member">Catering Member (Meal Taker)</option>
-                  <option value="org_admin">Admin (Catering Manager)</option>
-                </select>
-              </div>
-
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowInviteModal(false)}
-                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-secondary hover:bg-muted border border-border transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={inviteMemberMutation.isPending}
-                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 transition-all disabled:opacity-50"
-                >
-                  {inviteMemberMutation.isPending ? 'Sending...' : 'Send Invite'}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Slot Creation Dialog Modal */}
-      {showSlotModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glassmorphism max-w-md w-full p-8 rounded-2xl border border-accent/20 relative shadow-2xl">
-            <h3 className="font-serif text-xl font-bold mb-4">Create Operating Meal Slot</h3>
-            <form onSubmit={handleCreateSlot} className="space-y-4">
-              <div>
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Slot Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g., Breakfast, Dinner"
-                  value={slotName}
-                  onChange={(e) => setSlotName(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Start Time</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g., 08:00"
-                    value={slotStartTime}
-                    onChange={(e) => setSlotStartTime(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">End Time</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g., 09:30"
-                    value={slotEndTime}
-                    onChange={(e) => setSlotEndTime(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">RSVP Cutoff Time (HH:MM)</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g., 22:00"
-                    value={slotDeadline}
-                    onChange={(e) => setSlotDeadline(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">RSVP Deadline Day</label>
-                  <select
-                    value={slotDaysAhead}
-                    onChange={(e) => setSlotDaysAhead(parseInt(e.target.value))}
-                    className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground focus:outline-none"
-                  >
-                    <option value="0">Same Day of Meal</option>
-                    <option value="1">1 Day Before Meal</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1">Meal Slot Price ($)</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g., 12.50"
-                  value={slotPrice}
-                  onChange={(e) => setSlotPrice(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border text-sm text-foreground font-mono focus:outline-none"
-                />
-              </div>
-
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowSlotModal(false)}
-                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-secondary hover:bg-muted border border-border transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={createSlotMutation.isPending}
-                  className="w-1/2 py-3 rounded-xl text-xs font-bold bg-primary text-white hover:opacity-90 transition-all disabled:opacity-50"
-                >
-                  {createSlotMutation.isPending ? 'Creating...' : 'Create Slot'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
+      {/* Footer */}
+      <footer className="border-t border-[#eaedf0] py-6 text-center text-xs text-[#94a3b8] bg-[#fafbfc] shrink-0">
+        MealHub corporate dining suite • Live database synced
+      </footer>
     </div>
   );
 }
