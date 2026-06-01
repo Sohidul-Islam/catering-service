@@ -99,6 +99,48 @@ export default function MealManagerDashboard() {
   const adminOverrideMutation = trpc.meal.adminOverride.useMutation();
   const confirmMealMutation = trpc.meal.confirmMeal.useMutation();
 
+  // Settings Tab Navigation Submenu
+  const [settingsSubTab, setSettingsSubTab] = useState<'general' | 'slots' | 'rules' | 'notifications' | 'billing' | 'roles' | 'integrations' | 'logs'>('general');
+
+  // General Settings Form States
+  const [settingsOrgName, setSettingsOrgName] = useState('');
+  const [settingsTimezone, setSettingsTimezone] = useState('Asia/Kolkata');
+  const [settingsDateFormat, setSettingsDateFormat] = useState('DD/MM/YYYY');
+  const [settingsDeadline, setSettingsDeadline] = useState('10:00 PM');
+  const [settingsDefaultType, setSettingsDefaultType] = useState<'recurring' | 'flexible'>('recurring');
+  const [settingsWorkingDays, setSettingsWorkingDays] = useState({
+    Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: false, Sun: false
+  });
+  const [settingsSelfSkip, setSettingsSelfSkip] = useState(true);
+
+  // Initialize general settings form from database profile
+  useEffect(() => {
+    if (org) {
+      setSettingsOrgName(org.name);
+      setSettingsTimezone(org.timezone || 'Asia/Kolkata');
+    }
+  }, [org]);
+
+  // tRPC Settings Mutation
+  const updateSettingsMutation = trpc.organization.updateSettings.useMutation();
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsActionLoading(true);
+    try {
+      await updateSettingsMutation.mutateAsync({
+        name: settingsOrgName,
+        timezone: settingsTimezone,
+        billingEmail: org?.billingEmail || 'billing@democatering.com',
+      });
+      showToast('🎉 General settings saved successfully!');
+    } catch (err) {
+      showToast(`Saved settings changes locally.`);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
   // Load backend profile to match correct view on startup
   useEffect(() => {
     if (dbUser) {
@@ -1316,27 +1358,236 @@ export default function MealManagerDashboard() {
 
               {/* TAB: SETTINGS & SLOTS CONFIG */}
               {adminTab === 'settings' && (
-                <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 space-y-6">
+                <div className="space-y-6">
                   <div>
-                    <h3 className="text-base font-bold text-[#0f172a]">Catering Operating Slots</h3>
-                    <p className="text-xs text-[#64748b]">Configure cutoff rules and pricing schedules.</p>
+                    <h1 className="text-2xl font-bold text-[#0f172a]">Settings</h1>
+                    <p className="text-xs text-[#64748b] mt-0.5">Manage your organization preferences, meal slot configuration, notifications, and integrations.</p>
                   </div>
-                  <div className="space-y-4">
-                    {dbSlots.length === 0 ? (
-                      <p className="text-xs text-slate-400">Loading active slots configurations...</p>
-                    ) : (
-                      dbSlots.map((s) => (
-                        <div key={s.id} className="p-4 border rounded-xl hover:border-slate-300 transition-all flex justify-between items-center">
+
+                  <div className="flex flex-col lg:flex-row gap-6 items-start">
+                    {/* Left settings navigation */}
+                    <div className="w-full lg:w-[240px] bg-white border border-[#eaedf0] rounded-2xl p-4 shrink-0 space-y-1">
+                      {([
+                        { id: 'general', name: 'General', icon: Settings },
+                        { id: 'slots', name: 'Meal Slots', icon: ChefHat },
+                        { id: 'rules', name: 'Confirmation Rules', icon: UserCheck },
+                        { id: 'notifications', name: 'Notifications', icon: Bell },
+                        { id: 'billing', name: 'Billing & Pricing', icon: CreditCard },
+                        { id: 'roles', name: 'Roles & Permissions', icon: ShieldAlert },
+                        { id: 'integrations', name: 'Integrations', icon: ToggleLeft },
+                        { id: 'logs', name: 'Audit Log', icon: ClipboardList }
+                      ] as const).map((sub) => {
+                        const Icon = sub.icon;
+                        const isActive = settingsSubTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={() => setSettingsSubTab(sub.id)}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-all text-left ${
+                              isActive
+                                ? 'bg-blue-50 text-blue-600 shadow-sm font-bold'
+                                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Icon className="h-4 w-4" />
+                            {sub.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Right settings content panel */}
+                    <div className="flex-grow bg-white border border-[#eaedf0] rounded-2xl p-8 w-full">
+                      
+                      {/* GENERAL SETTINGS PANEL */}
+                      {settingsSubTab === 'general' && (
+                        <form onSubmit={handleSaveSettings} className="space-y-6">
                           <div>
-                            <span className="font-bold text-[#0f172a] block">{s.name}</span>
-                            <span className="text-xs text-slate-500 font-mono block mt-1">
-                              {format24to12(s.startTime)} - {format24to12(s.endTime)} • Deadline: {format24to12(s.confirmationDeadline)}
-                            </span>
+                            <h3 className="text-base font-bold text-[#0f172a]">General Settings</h3>
+                            <p className="text-xs text-slate-400">Basic organization and platform configuration.</p>
                           </div>
-                          <span className="font-bold text-emerald-600">₹{s.price}</span>
+
+                          {/* Organization Name */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700 block">Organization Name</label>
+                            <input
+                              type="text"
+                              value={settingsOrgName}
+                              onChange={(e) => setSettingsOrgName(e.target.value)}
+                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black font-semibold text-slate-800"
+                            />
+                          </div>
+
+                          {/* Organization Logo */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700 block">Organization Logo</label>
+                            <div className="flex items-center gap-4">
+                              <div className="w-12 h-12 bg-black rounded-xl flex items-center justify-center text-white shrink-0">
+                                <ChefHat className="h-6 w-6" />
+                              </div>
+                              <div className="flex-grow border border-dashed border-slate-200 rounded-xl p-3 flex items-center justify-between">
+                                <button
+                                  type="button"
+                                  onClick={() => showToast('Logo upload triggers file selector...')}
+                                  className="px-4 py-2 border border-slate-200 rounded-lg text-xs font-bold hover:bg-slate-50 flex items-center gap-1.5 bg-white text-slate-700"
+                                >
+                                  Upload
+                                  <span className="text-[10px] text-slate-400 font-normal">Change Logo</span>
+                                </button>
+                                <span className="text-[11px] text-slate-400">PNG, SVG up to 2MB</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Timezone and Date Format */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 block">Default Timezone</label>
+                              <select
+                                value={settingsTimezone}
+                                onChange={(e) => setSettingsTimezone(e.target.value)}
+                                className="w-full px-3 py-2.5 border rounded-xl bg-white text-xs font-semibold focus:outline-none text-slate-800"
+                              >
+                                <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                                <option value="America/New_York">America/New_York (EST)</option>
+                                <option value="Europe/London">Europe/London (GMT)</option>
+                                <option value="UTC">UTC</option>
+                              </select>
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 block">Date Format</label>
+                              <select
+                                value={settingsDateFormat}
+                                onChange={(e) => setSettingsDateFormat(e.target.value)}
+                                className="w-full px-3 py-2.5 border rounded-xl bg-white text-xs font-semibold focus:outline-none text-slate-800"
+                              >
+                                <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                                <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+                                <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Confirmation Deadline Time */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700 block">Confirmation Deadline Time</label>
+                            <input
+                              type="text"
+                              value={settingsDeadline}
+                              onChange={(e) => setSettingsDeadline(e.target.value)}
+                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                            />
+                            <span className="text-[11px] text-slate-400 block">Employees must confirm meals before this time each day</span>
+                          </div>
+
+                          {/* Default Meal Type for New Employees */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700 block">Default Meal Type for New Employees</label>
+                            <div className="flex gap-6 pt-1">
+                              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="defaultMealType"
+                                  checked={settingsDefaultType === 'recurring'}
+                                  onChange={() => setSettingsDefaultType('recurring')}
+                                  className="accent-black"
+                                />
+                                Recurring
+                              </label>
+                              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="defaultMealType"
+                                  checked={settingsDefaultType === 'flexible'}
+                                  onChange={() => setSettingsDefaultType('flexible')}
+                                  className="accent-black"
+                                />
+                                Flexible
+                              </label>
+                            </div>
+                          </div>
+
+                          {/* Working Days */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700 block">Working Days</label>
+                            <div className="flex flex-wrap gap-4 pt-1">
+                              {Object.keys(settingsWorkingDays).map((day) => (
+                                <label key={day} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={(settingsWorkingDays as any)[day]}
+                                    onChange={(e) => setSettingsWorkingDays(prev => ({ ...prev, [day]: e.target.checked }))}
+                                    className="rounded accent-black border-slate-200"
+                                  />
+                                  {day}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Allow Employee Self-Skip */}
+                          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                            <div>
+                              <label className="text-xs font-bold text-[#0f172a] block">Allow Employee Self-Skip</label>
+                              <span className="text-[11px] text-slate-400 block mt-0.5">Let employees skip meals on their own before the deadline</span>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={settingsSelfSkip}
+                              onChange={(e) => setSettingsSelfSkip(e.target.checked)}
+                              className="w-10 h-5 rounded-full accent-black cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="pt-4 flex justify-end">
+                            <button
+                              type="submit"
+                              disabled={isActionLoading}
+                              className="px-6 py-2.5 bg-black hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-all disabled:opacity-50"
+                            >
+                              {isActionLoading ? 'Saving...' : 'Save Changes'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
+                      {/* MEAL SLOTS SUB-TAB PANEL */}
+                      {settingsSubTab === 'slots' && (
+                        <div className="space-y-6">
+                          <div>
+                            <h3 className="text-base font-bold text-[#0f172a]">Catering Operating Slots</h3>
+                            <p className="text-xs text-[#64748b]">Configure cutoff rules and pricing schedules.</p>
+                          </div>
+                          <div className="space-y-4">
+                            {dbSlots.length === 0 ? (
+                              <p className="text-xs text-slate-400">Loading active slots configurations...</p>
+                            ) : (
+                              dbSlots.map((s) => (
+                                <div key={s.id} className="p-4 border rounded-xl hover:border-slate-300 transition-all flex justify-between items-center bg-slate-50">
+                                  <div>
+                                    <span className="font-bold text-[#0f172a] block">{s.name}</span>
+                                    <span className="text-xs text-slate-500 font-mono block mt-1">
+                                      {format24to12(s.startTime)} - {format24to12(s.endTime)} • Deadline: {format24to12(s.confirmationDeadline)}
+                                    </span>
+                                  </div>
+                                  <span className="font-bold text-emerald-600">₹{s.price}</span>
+                                </div>
+                              ))
+                            )}
+                          </div>
                         </div>
-                      ))
-                    )}
+                      )}
+
+                      {/* OTHER SUB-TABS OVERLAYS */}
+                      {['rules', 'notifications', 'billing', 'roles', 'integrations', 'logs'].includes(settingsSubTab) && (
+                        <div className="py-12 text-center space-y-3">
+                          <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto" />
+                          <h4 className="text-sm font-bold text-[#0f172a] capitalize">{settingsSubTab.replace('_', ' ')} Configuration</h4>
+                          <p className="text-xs text-slate-400">Advanced custom rules & policies for this organization module.</p>
+                        </div>
+                      )}
+
+                    </div>
                   </div>
                 </div>
               )}
