@@ -9,6 +9,35 @@ import {
   ClipboardList, LogOut, ChevronLeft, ChevronRight, Filter, Plus, Trash2, Edit3, ArrowRight, Download, FileText
 } from 'lucide-react';
 
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+} from 'chart.js';
+import { Line as LineChart, Doughnut as DonutChart, Bar as BarChart } from 'react-chartjs-2';
+
+// Register Chart.js elements
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+);
+
 const format24to12 = (timeStr: string) => {
   if (!timeStr) return '';
   const [hourStr, minStr] = timeStr.split(':');
@@ -46,11 +75,6 @@ export default function MealManagerDashboard() {
 
   const [notification, setNotification] = useState<string | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
-
-  // Chart hover states
-  const [hoveredTrendPoint, setHoveredTrendPoint] = useState<{ x: number; y: number; day: string; count: number } | null>(null);
-  const [hoveredBarPoint, setHoveredBarPoint] = useState<{ x: number; y: number; day: string; lunch: number; dinner: number } | null>(null);
-  const [hoveredDonutSegment, setHoveredDonutSegment] = useState<{ label: string; count: number; percent: string } | null>(null);
 
   // tRPC Integrations
   const { data: dbUser, isLoading: isProfileLoading } = trpc.organization.getCurrentProfile.useQuery(undefined, {
@@ -279,21 +303,94 @@ export default function MealManagerDashboard() {
     );
   }
 
-  // Data mapping for Line Chart
-  const trendData = [
-    { day: 'Mon', count: 70, x: 50, y: 135 },
-    { day: 'Tue', count: 85, x: 150, y: 105 },
-    { day: 'Wed', count: 78, x: 250, y: 118 },
-    { day: 'Thu', count: 90, x: 350, y: 95 },
-    { day: 'Fri', count: 68, x: 450, y: 138 }
-  ];
+  // Real Charts Dynamic Configs
+  const trendChartData = {
+    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+    datasets: [
+      {
+        label: 'Daily Count',
+        data: [70, 85, 78, 90, 68],
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59, 130, 246, 0.05)',
+        tension: 0.4,
+        fill: true,
+        pointBackgroundColor: '#3b82f6',
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 2,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+      }
+    ]
+  };
+
+  const trendChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: { enabled: true }
+    },
+    scales: {
+      x: { grid: { display: false } },
+      y: { min: 0, max: 100, ticks: { stepSize: 25 } }
+    }
+  };
+
+  const breakdownDonutData = {
+    labels: ['Recurring', 'Flexible', 'Pending'],
+    datasets: [
+      {
+        data: [58, 32, 12],
+        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b'],
+        borderWidth: 0,
+        hoverOffset: 6
+      }
+    ]
+  };
+
+  const breakdownDonutOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: '70%',
+    plugins: {
+      legend: { display: false },
+      tooltip: { enabled: true }
+    }
+  };
+
+  const distributionPieData = {
+    labels: ['Recurring', 'Flexible'],
+    datasets: [
+      {
+        data: [64, 36],
+        backgroundColor: ['#3b82f6', '#f97316'],
+        borderWidth: 0
+      }
+    ]
+  };
+
+  const reportsBarData = {
+    labels: ['01', '05', '08', '13', '17', '21', '25', '30'],
+    datasets: [
+      {
+        label: 'Lunch',
+        data: [60, 80, 70, 90, 85, 95, 78, 100],
+        backgroundColor: '#0284c7',
+        borderRadius: 4,
+      },
+      {
+        label: 'Dinner',
+        data: [40, 50, 45, 60, 55, 70, 50, 80],
+        backgroundColor: '#0f766e',
+        borderRadius: 4,
+      }
+    ]
+  };
 
   return (
     <div className="min-h-screen bg-[#fafbfc] text-[#2c3e50] font-sans antialiased flex flex-col justify-between">
       
-      {/* ──────────────────────────────────────────────────────── */}
       {/* DEVELOPER SIMULATION CONTROLLER (Floating bottom-right) */}
-      {/* ──────────────────────────────────────────────────────── */}
       <div className="fixed bottom-6 right-6 z-50 bg-white border border-[#e2e8f0] rounded-xl shadow-2xl p-3.5 flex flex-col gap-2 max-w-xs">
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-4 w-4 text-orange-500" />
@@ -611,152 +708,37 @@ export default function MealManagerDashboard() {
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Line Chart Card */}
-                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 lg:col-span-2 space-y-4 relative">
-                      <div>
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 lg:col-span-2 h-[280px]">
+                      <div className="mb-4">
                         <h3 className="text-base font-bold text-[#0f172a]">Meal Trend (This Week)</h3>
                         <p className="text-xs text-[#64748b]">Daily confirmed meal counts, Monday to Friday</p>
                       </div>
-
-                      {/* Tooltip Overlay */}
-                      {hoveredTrendPoint && (
-                        <div
-                          className="absolute bg-black text-white text-[11px] font-bold px-2 py-1 rounded shadow-lg pointer-events-none z-10 transition-all duration-75"
-                          style={{
-                            left: `${hoveredTrendPoint.x + 30}px`,
-                            top: `${hoveredTrendPoint.y + 10}px`
-                          }}
-                        >
-                          {hoveredTrendPoint.day}: {hoveredTrendPoint.count} meals
-                        </div>
-                      )}
-
-                      <div className="relative pt-4 h-[200px] w-full">
-                        <svg className="w-full h-full" viewBox="0 0 500 200" preserveAspectRatio="none">
-                          {/* Grid lines */}
-                          <line x1="0" y1="180" x2="500" y2="180" stroke="#f1f5f9" strokeWidth="1" />
-                          <line x1="0" y1="135" x2="500" y2="135" stroke="#f1f5f9" strokeWidth="1" />
-                          <line x1="0" y1="90" x2="500" y2="90" stroke="#f1f5f9" strokeWidth="1" />
-                          <line x1="0" y1="45" x2="500" y2="45" stroke="#f1f5f9" strokeWidth="1" />
-
-                          {/* Hover Guide Line */}
-                          {hoveredTrendPoint && (
-                            <line
-                              x1={hoveredTrendPoint.x}
-                              y1="10"
-                              x2={hoveredTrendPoint.x}
-                              y2="180"
-                              stroke="#94a3b8"
-                              strokeWidth="1"
-                              strokeDasharray="4 4"
-                            />
-                          )}
-
-                          {/* Path line */}
-                          <path
-                            d="M 50,135 Q 125,115 150,105 T 250,118 T 350,95 T 450,138"
-                            fill="none"
-                            stroke="#3b82f6"
-                            strokeWidth="3.5"
-                            strokeLinecap="round"
-                          />
-
-                          {/* Interactive data circles */}
-                          {trendData.map((pt, i) => (
-                            <circle
-                              key={i}
-                              cx={pt.x}
-                              cy={pt.y}
-                              r={hoveredTrendPoint?.day === pt.day ? 7 : 5}
-                              fill={hoveredTrendPoint?.day === pt.day ? '#2563eb' : '#3b82f6'}
-                              stroke="white"
-                              strokeWidth={2}
-                              className="cursor-pointer transition-all duration-100"
-                              onMouseEnter={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setHoveredTrendPoint({
-                                  x: pt.x,
-                                  y: pt.y,
-                                  day: pt.day,
-                                  count: pt.count
-                                });
-                              }}
-                              onMouseLeave={() => setHoveredTrendPoint(null)}
-                            />
-                          ))}
-                        </svg>
-                        <div className="flex justify-between text-[11px] text-[#94a3b8] font-semibold px-[35px] mt-2">
-                          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span>
-                        </div>
+                      <div className="h-[180px] w-full">
+                        <LineChart data={trendChartData} options={trendChartOptions} />
                       </div>
                     </div>
 
                     {/* Donut Chart Card */}
-                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 flex flex-col justify-between relative">
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 flex flex-col justify-between h-[280px] relative">
                       <div>
                         <h3 className="text-base font-bold text-[#0f172a]">Confirmation Breakdown</h3>
-                        <p className="text-xs text-[#64748b]">Hover segments to view percentage breakdowns</p>
+                        <p className="text-xs text-[#64748b]">Recurring vs Flexible vs Pending</p>
                       </div>
 
-                      {/* Tooltip */}
-                      {hoveredDonutSegment && (
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-                          <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold block">{hoveredDonutSegment.label}</span>
-                          <span className="text-xl font-bold text-[#0f172a] block">{hoveredDonutSegment.count}</span>
-                          <span className="text-xs text-slate-500 font-semibold">{hoveredDonutSegment.percent}</span>
+                      <div className="flex-1 relative min-h-[120px] flex items-center justify-center py-2">
+                        <div className="w-full h-full max-h-[140px]">
+                          <DonutChart data={breakdownDonutData} options={breakdownDonutOptions} />
                         </div>
-                      )}
-
-                      <div className="flex items-center justify-center py-4">
-                        <svg className="w-[120px] h-[120px]" viewBox="0 0 100 100">
-                          {/* Segment: Recurring 58% (Blue) */}
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="40"
-                            fill="transparent"
-                            stroke="#3b82f6"
-                            strokeWidth="12"
-                            strokeDasharray="145 251.2"
-                            strokeDashoffset="0"
-                            className="hover:stroke-[#2563eb] cursor-pointer transition-all"
-                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Recurring', count: 58, percent: '56.8%' })}
-                            onMouseLeave={() => setHoveredDonutSegment(null)}
-                          />
-                          {/* Segment: Flexible 32% (Green) */}
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="40"
-                            fill="transparent"
-                            stroke="#10b981"
-                            strokeWidth="12"
-                            strokeDasharray="80 251.2"
-                            strokeDashoffset="-145"
-                            className="hover:stroke-[#059669] cursor-pointer transition-all"
-                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Flexible', count: 32, percent: '31.4%' })}
-                            onMouseLeave={() => setHoveredDonutSegment(null)}
-                          />
-                          {/* Segment: Pending 12% (Amber) */}
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="40"
-                            fill="transparent"
-                            stroke="#f59e0b"
-                            strokeWidth="12"
-                            strokeDasharray="26 251.2"
-                            strokeDashoffset="-225"
-                            className="hover:stroke-[#d97706] cursor-pointer transition-all"
-                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Pending', count: 12, percent: '11.8%' })}
-                            onMouseLeave={() => setHoveredDonutSegment(null)}
-                          />
-                          <circle cx="50" cy="50" r="28" fill="white" />
-                        </svg>
+                        <div className="absolute text-center pointer-events-none">
+                          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block">Total</span>
+                          <span className="text-xl font-bold text-[#0f172a] block">102</span>
+                        </div>
                       </div>
-                      <div className="space-y-1 text-xs">
-                        <div className="flex justify-between"><span>Recurring</span><span className="font-bold text-[#3b82f6]">58</span></div>
-                        <div className="flex justify-between"><span>Flexible</span><span className="font-bold text-[#10b981]">32</span></div>
-                        <div className="flex justify-between"><span>Pending</span><span className="font-bold text-[#f59e0b]">12</span></div>
+
+                      <div className="space-y-1 text-xs mt-2 border-t border-slate-50 pt-2 flex justify-between">
+                        <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-[#3b82f6]" /> Recurring (58)</div>
+                        <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-[#10b981]" /> Flexible (32)</div>
+                        <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" /> Pending (12)</div>
                       </div>
                     </div>
                   </div>
@@ -890,13 +872,13 @@ export default function MealManagerDashboard() {
                                 <td className="px-6 py-4 text-right space-x-2">
                                   <button
                                     onClick={() => handleAdminRsvpChange(row.id, 'Confirmed')}
-                                    className="px-2.5 py-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-xs font-bold animate-fade-in"
+                                    className="px-2.5 py-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-xs font-bold"
                                   >
                                     Confirm
                                   </button>
                                   <button
                                     onClick={() => handleAdminRsvpChange(row.id, 'Skipped')}
-                                    className="px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-bold animate-fade-in"
+                                    className="px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-bold"
                                   >
                                     Skip
                                   </button>
@@ -1111,103 +1093,31 @@ export default function MealManagerDashboard() {
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Daily Meal Consumption Bar Chart Card */}
-                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 lg:col-span-2 space-y-4 relative">
-                      <h3 className="text-base font-bold text-[#0f172a]">Daily Meal Consumption</h3>
-
-                      {hoveredBarPoint && (
-                        <div
-                          className="absolute bg-black text-white text-[11px] font-bold px-2 py-1.5 rounded shadow-lg pointer-events-none z-10 transition-all duration-75"
-                          style={{
-                            left: `${hoveredBarPoint.x}px`,
-                            top: `${hoveredBarPoint.y - 45}px`
-                          }}
-                        >
-                          <p className="font-semibold text-slate-300">Day {hoveredBarPoint.day}</p>
-                          <p>☀️ Lunch: <span className="text-[#3b82f6] font-bold">{hoveredBarPoint.lunch}</span></p>
-                          <p>🌙 Dinner: <span className="text-[#10b981] font-bold">{hoveredBarPoint.dinner}</span></p>
-                        </div>
-                      )}
-
-                      <div className="h-[220px] w-full relative pt-4 flex flex-col justify-between">
-                        <div className="flex-1 flex items-end justify-between px-6 gap-2">
-                          {[
-                            { day: '01', lunch: 60, dinner: 40 },
-                            { day: '05', lunch: 80, dinner: 50 },
-                            { day: '08', lunch: 70, dinner: 45 },
-                            { day: '13', lunch: 90, dinner: 60 },
-                            { day: '17', lunch: 85, dinner: 55 },
-                            { day: '21', lunch: 95, dinner: 70 },
-                            { day: '25', lunch: 78, dinner: 50 },
-                            { day: '30', lunch: 100, dinner: 80 }
-                          ].map((data, idx) => (
-                            <div
-                              key={idx}
-                              className="flex-1 flex flex-col items-center gap-1 h-full justify-end group cursor-pointer"
-                              onMouseEnter={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setHoveredBarPoint({
-                                  x: rect.left - rect.width,
-                                  y: 110,
-                                  day: data.day,
-                                  lunch: data.lunch,
-                                  dinner: data.dinner
-                                });
-                              }}
-                              onMouseLeave={() => setHoveredBarPoint(null)}
-                            >
-                              <div className="w-3.5 bg-[#0f766e] group-hover:bg-[#0d9488] rounded-t transition-all" style={{ height: `${data.dinner}%` }} />
-                              <div className="w-3.5 bg-[#0284c7] group-hover:bg-[#0ea5e9] rounded-t transition-all" style={{ height: `${data.lunch}%` }} />
-                              <span className="text-[10px] text-slate-400 font-semibold mt-1">{data.day}</span>
-                            </div>
-                          ))}
-                        </div>
+                    {/* Daily Meal Consumption Bar Chart */}
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 lg:col-span-2 h-[280px]">
+                      <h3 className="text-base font-bold text-[#0f172a] mb-4">Daily Meal Consumption</h3>
+                      <div className="h-[200px] w-full">
+                        <BarChart data={reportsBarData} options={trendChartOptions} />
                       </div>
                     </div>
 
-                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 flex flex-col justify-between relative">
+                    {/* Meal Type Distribution Pie */}
+                    <div className="bg-white border border-[#eaedf0] rounded-2xl p-6 flex flex-col justify-between h-[280px] relative">
                       <h3 className="text-base font-bold text-[#0f172a]">Meal Type Distribution</h3>
                       
-                      {hoveredDonutSegment && (
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-                          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block">{hoveredDonutSegment.label}</span>
-                          <span className="text-base font-bold text-[#0f172a] block">{hoveredDonutSegment.percent}</span>
+                      <div className="flex-grow min-h-[140px] relative flex items-center justify-center">
+                        <div className="w-full h-full max-h-[140px]">
+                          <DonutChart data={distributionPieData} options={breakdownDonutOptions} />
                         </div>
-                      )}
-
-                      <div className="flex items-center justify-center py-6">
-                        <svg className="w-[125px] h-[125px]" viewBox="0 0 100 100">
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="40"
-                            fill="transparent"
-                            stroke="#3b82f6"
-                            strokeWidth="14"
-                            strokeDasharray="160 251.2"
-                            className="cursor-pointer"
-                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Recurring', count: 64, percent: '64%' })}
-                            onMouseLeave={() => setHoveredDonutSegment(null)}
-                          />
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="40"
-                            fill="transparent"
-                            stroke="#f97316"
-                            strokeWidth="14"
-                            strokeDasharray="91.2 251.2"
-                            strokeDashoffset="-160"
-                            className="cursor-pointer"
-                            onMouseEnter={() => setHoveredDonutSegment({ label: 'Flexible', count: 36, percent: '36%' })}
-                            onMouseLeave={() => setHoveredDonutSegment(null)}
-                          />
-                          <circle cx="50" cy="50" r="28" fill="white" />
-                        </svg>
+                        <div className="absolute text-center pointer-events-none">
+                          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold block">Recurring</span>
+                          <span className="text-base font-bold text-[#0f172a] block">64%</span>
+                        </div>
                       </div>
-                      <div className="space-y-1 text-xs">
-                        <div className="flex justify-between"><span>Recurring</span><span className="font-bold text-[#3b82f6]">64%</span></div>
-                        <div className="flex justify-between"><span>Flexible</span><span className="font-bold text-[#f97316]">36%</span></div>
+                      
+                      <div className="space-y-1 text-xs mt-2 border-t border-slate-50 pt-2 flex justify-between">
+                        <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-[#3b82f6]" /> Recurring (64%)</div>
+                        <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-[#f97316]" /> Flexible (36%)</div>
                       </div>
                     </div>
                   </div>
