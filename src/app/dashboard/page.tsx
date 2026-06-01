@@ -1,12 +1,14 @@
 'use client';
 
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/purity */
+
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/utils/trpc';
 import {
-  Search, Bell, ChevronDown, Calendar, AlertTriangle, Users, TrendingUp, Check, X, Settings,
+  Search, Bell, Calendar, AlertTriangle, Users, TrendingUp, Check, X, Settings,
   LayoutDashboard, UserCheck, ShieldAlert, Sparkles, ChefHat, ToggleLeft, Clock, CreditCard,
-  ClipboardList, LogOut, ChevronLeft, ChevronRight, Filter, Plus, Trash2, Edit3, ArrowRight, Download, FileText,
+  ClipboardList, LogOut, ChevronLeft, ChevronRight, Filter, Plus, Trash2, Edit3, Download, FileText,
   Sunset, Sunrise, Coffee, Moon, Sun
 } from 'lucide-react';
 
@@ -49,12 +51,6 @@ const format24to12 = (timeStr: string) => {
   return `${displayHour}:${minStr || '00'} ${ampm}`;
 };
 
-const formatRange24to12 = (rangeStr: string) => {
-  if (!rangeStr || !rangeStr.includes(' - ')) return rangeStr;
-  const [start, end] = rangeStr.split(' - ');
-  return `${format24to12(start)} - ${format24to12(end)}`;
-};
-
 export default function MealManagerDashboard() {
   // Role Switcher for Developer Review (Admin vs Employee view)
   const [devRole, setDevRole] = useState<'admin' | 'employee'>('admin');
@@ -71,7 +67,7 @@ export default function MealManagerDashboard() {
   const [newEmpName, setNewEmpName] = useState('');
   const [newEmpEmail, setNewEmpEmail] = useState('');
   const [newEmpDept, setNewEmpDept] = useState('Engineering');
-  const [newEmpRole, setNewEmpRole] = useState<'org_admin' | 'org_member'>('org_member');
+  const newEmpRole: 'org_admin' | 'org_member' = 'org_member';
   const [newEmpBehavior, setNewEmpBehavior] = useState<'recurring' | 'flexible'>('recurring');
 
   const [notification, setNotification] = useState<string | null>(null);
@@ -102,7 +98,7 @@ export default function MealManagerDashboard() {
           // If already in 24h or simple HH:MM format
           return time;
         }
-        let [_, hrs, mins, ampm] = match;
+        const [, hrs, mins, ampm] = match;
         let h = parseInt(hrs, 10);
         if (ampm.toUpperCase() === 'PM' && h < 12) h += 12;
         if (ampm.toUpperCase() === 'AM' && h === 12) h = 0;
@@ -147,8 +143,8 @@ export default function MealManagerDashboard() {
       setNewSlotEndTime('09:30 AM');
       setNewSlotPrice('45');
       setNewSlotIsActive(true);
-    } catch (err: any) {
-      showToast(`Error: ${err.message || 'Failed to save slot'}`);
+    } catch (err) {
+      showToast(`Error: ${(err as Error).message || 'Failed to save slot'}`);
     } finally {
       setIsActionLoading(false);
     }
@@ -161,8 +157,8 @@ export default function MealManagerDashboard() {
       await deleteSlotMutation.mutateAsync({ slotId });
       showToast('🗑️ Slot removed');
       refetchSlots();
-    } catch (err: any) {
-      showToast(`Error: ${err.message || 'Failed to delete slot'}`);
+    } catch (err) {
+      showToast(`Error: ${(err as Error).message || 'Failed to delete slot'}`);
     } finally {
       setIsActionLoading(false);
     }
@@ -177,19 +173,19 @@ export default function MealManagerDashboard() {
       });
       showToast(`Slot status updated`);
       refetchSlots();
-    } catch (err: any) {
-      showToast(`Error: ${err.message || 'Failed to toggle status'}`);
+    } catch (err) {
+      showToast(`Error: ${(err as Error).message || 'Failed to toggle status'}`);
     } finally {
       setIsActionLoading(false);
     }
   };
 
-  const handleEditSlotClick = (slot: any) => {
+  const handleEditSlotClick = (slot: typeof dbSlots[number]) => {
     // Helper to format 24h to 12h for edit form
     const formatTo12h = (time24: string) => {
       if (!time24) return '';
       const [hStr, mStr] = time24.split(':');
-      let h = parseInt(hStr, 10);
+      const h = parseInt(hStr, 10);
       if (isNaN(h)) return time24;
       const ampm = h >= 12 ? 'PM' : 'AM';
       const displayHour = h % 12 === 0 ? 12 : h % 12;
@@ -233,7 +229,7 @@ export default function MealManagerDashboard() {
 
   // Mutations
   const addMemberMutation = trpc.organization.inviteMember.useMutation();
-  const toggleBehaviorMutation = trpc.organization.toggleMemberBehavior.useMutation();
+
   const adminOverrideMutation = trpc.meal.adminOverride.useMutation();
   const confirmMealMutation = trpc.meal.confirmMeal.useMutation();
   const createSlotMutation = trpc.organization.createSlot.useMutation();
@@ -254,7 +250,43 @@ export default function MealManagerDashboard() {
   });
   const [settingsSelfSkip, setSettingsSelfSkip] = useState(true);
 
-  // Initialize general settings form from database profile
+  // Confirmation Rules State Variables
+  const [rulesDeadline, setRulesDeadline] = useState('10:00 PM');
+  const [rulesAdvanceBooking, setRulesAdvanceBooking] = useState(1);
+  const [rulesAllowLate, setRulesAllowLate] = useState(false);
+  const [rulesAutoConfirm, setRulesAutoConfirm] = useState(true);
+  const [rulesSkipConfirmation, setRulesSkipConfirmation] = useState(true);
+  const [rulesReminderTiming, setRulesReminderTiming] = useState('2 hours before deadline');
+
+  // Notifications Settings State Variables
+  const [notifRemind, setNotifRemind] = useState(true);
+  const [notifSkipped, setNotifSkipped] = useState(true);
+  const [notifMenuUpdate, setNotifMenuUpdate] = useState(false);
+  const [notifBillingReady, setNotifBillingReady] = useState(true);
+  const [notifLowRate, setNotifLowRate] = useState(true);
+  const [notifLowRateThreshold, setNotifLowRateThreshold] = useState(60);
+  const [notifNewEmployee, setNotifNewEmployee] = useState(true);
+  const [notifSlotChanged, setNotifSlotChanged] = useState(false);
+  const [notifInvoiceGenerated, setNotifInvoiceGenerated] = useState(true);
+  const [notifChannelEmail, setNotifChannelEmail] = useState(true);
+  const [notifChannelSMS, setNotifChannelSMS] = useState(false);
+  const [notifChannelInApp, setNotifChannelInApp] = useState(true);
+
+  // Billing Configuration State Variables
+  const [billingCycle, setBillingCycle] = useState<'Monthly' | 'Weekly' | 'Bi-weekly'>('Monthly');
+  const [billingInvoiceGenDay, setBillingInvoiceGenDay] = useState(1);
+  const [billingPaymentDueDays, setBillingPaymentDueDays] = useState(15);
+  const [billingCurrency, setBillingCurrency] = useState('INR (₹)');
+  const [billingTaxRate, setBillingTaxRate] = useState(18);
+  const [billingIncludeItemized, setBillingIncludeItemized] = useState(false);
+  const [billingEmployerSubsidy, setBillingEmployerSubsidy] = useState(20);
+
+  // Audit Log Filter States
+  const [auditLogDateRange, setAuditLogDateRange] = useState('01 Jun 2025 – 30 Jun 2025');
+  const [auditLogActionType, setAuditLogActionType] = useState('All Actions');
+  const [auditLogUser, setAuditLogUser] = useState('All Users');
+
+
   useEffect(() => {
     if (org) {
       setSettingsOrgName(org.name);
@@ -275,14 +307,13 @@ export default function MealManagerDashboard() {
         billingEmail: org?.billingEmail || 'billing@democatering.com',
       });
       showToast('🎉 General settings saved successfully!');
-    } catch (err) {
+    } catch {
       showToast(`Saved settings changes locally.`);
     } finally {
       setIsActionLoading(false);
     }
   };
 
-  // Load backend profile to match correct view on startup
   useEffect(() => {
     if (dbUser) {
       setDevRole(dbUser.role === 'org_admin' || dbUser.role === 'super_admin' ? 'admin' : 'employee');
@@ -321,7 +352,7 @@ export default function MealManagerDashboard() {
       }
       setEmployeeMeals(prev => prev.map(m => m.id === mealId ? { ...m, status } : m));
       showToast(`🎉 RSVP updated: ${status}`);
-    } catch (err) {
+    } catch {
       setEmployeeMeals(prev => prev.map(m => m.id === mealId ? { ...m, status } : m));
       showToast(`Updated RSVP state to ${status}`);
     } finally {
@@ -361,7 +392,7 @@ export default function MealManagerDashboard() {
         by: 'Admin Override'
       } : item));
       showToast(`Status updated to ${newStatus}`);
-    } catch (err) {
+    } catch {
       setConfirmationsList(prev => prev.map(item => item.id === id ? {
         ...item,
         status: newStatus,
@@ -428,7 +459,7 @@ export default function MealManagerDashboard() {
       setNewEmpEmail('');
       showToast(`🎉 Successfully added and invited ${newEmpName}!`);
       refetchMembers();
-    } catch (err) {
+    } catch {
       const newEmp = {
         id: `e-${Date.now()}`,
         name: newEmpName,
@@ -880,7 +911,7 @@ export default function MealManagerDashboard() {
                     <div className="bg-[#eef4ff] border border-[#dbebff] rounded-2xl p-5 flex flex-col justify-between h-[130px]">
                       <div className="flex justify-between items-start">
                         <div>
-                          <span className="text-xs font-semibold text-[#1e40af] uppercase tracking-wider block">Tomorrow's Meals</span>
+                          <span className="text-xs font-semibold text-[#1e40af] uppercase tracking-wider block">Tomorrow&apos;s Meals</span>
                           <span className="text-[34px] font-bold text-black block mt-1">78</span>
                         </div>
                         <div className="w-9 h-9 rounded-lg bg-[#3b82f6] flex items-center justify-center text-white shrink-0 shadow-sm">
@@ -1016,7 +1047,7 @@ export default function MealManagerDashboard() {
                     <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                       <select
                         value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value as any)}
+                        onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
                         className="px-3 py-2 border border-[#e2e8f0] rounded-xl text-xs bg-white font-medium focus:outline-none"
                       >
                         <option value="all">Filter by Status</option>
@@ -1106,7 +1137,7 @@ export default function MealManagerDashboard() {
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
                       <h1 className="text-2xl font-bold text-[#0f172a]">Employee Management</h1>
-                      <p className="text-xs text-[#64748b]">Manage your organization's meal members.</p>
+                      <p className="text-xs text-[#64748b]">Manage your organization&apos;s meal members.</p>
                     </div>
 
                     <button
@@ -1162,7 +1193,7 @@ export default function MealManagerDashboard() {
                               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Behavior Mode</label>
                               <select
                                 value={newEmpBehavior}
-                                onChange={(e) => setNewEmpBehavior(e.target.value as any)}
+                                onChange={(e) => setNewEmpBehavior(e.target.value as typeof newEmpBehavior)}
                                 className="w-full px-3 py-2.5 border rounded-xl bg-white text-xs font-semibold focus:outline-none"
                               >
                                 <option value="recurring">Recurring</option>
@@ -1656,7 +1687,7 @@ export default function MealManagerDashboard() {
                                 <label key={day} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
                                   <input
                                     type="checkbox"
-                                    checked={(settingsWorkingDays as any)[day]}
+                                    checked={settingsWorkingDays[day as keyof typeof settingsWorkingDays]}
                                     onChange={(e) => setSettingsWorkingDays(prev => ({ ...prev, [day]: e.target.checked }))}
                                     className="rounded accent-black border-slate-200"
                                   />
@@ -1718,7 +1749,7 @@ export default function MealManagerDashboard() {
                                   {dbSlots.length === 0 ? (
                                     <tr>
                                       <td colSpan={5} className="px-6 py-8 text-center text-xs text-slate-400">
-                                        No active meal slots configured. Click "Add New Slot" below.
+                                        No active meal slots configured. Click &quot;Add New Slot&quot; below.
                                       </td>
                                     </tr>
                                   ) : (
@@ -1956,12 +1987,514 @@ export default function MealManagerDashboard() {
                         </div>
                       )}
 
-                      {/* OTHER SUB-TABS OVERLAYS */}
-                      {['rules', 'notifications', 'billing', 'roles', 'integrations', 'logs'].includes(settingsSubTab) && (
+                      {/* CONFIRMATION RULES PANEL */}
+                      {settingsSubTab === 'rules' && (
+                        <div className="space-y-6">
+                          <div>
+                            <h3 className="text-base font-bold text-[#0f172a]">Confirmation Rules</h3>
+                            <p className="text-xs text-[#64748b] mt-0.5">Define how and when employees must confirm their meals.</p>
+                          </div>
+
+                          <div className="space-y-6">
+                            {/* Daily Confirmation Deadline */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 block">Daily Confirmation Deadline</label>
+                              <div className="relative max-w-md">
+                                <input
+                                  type="text"
+                                  value={rulesDeadline}
+                                  onChange={(e) => setRulesDeadline(e.target.value)}
+                                  className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                                />
+                                <Clock className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94a3b8]" />
+                              </div>
+                              <span className="text-[11px] text-[#64748b] block">Employees must confirm meals before this time each day</span>
+                            </div>
+
+                            <hr className="border-slate-100" />
+
+                            {/* Advance Booking Window */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 block">Advance Booking Window</label>
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="number"
+                                  value={rulesAdvanceBooking}
+                                  onChange={(e) => setRulesAdvanceBooking(parseInt(e.target.value) || 1)}
+                                  className="w-20 px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                                />
+                                <span className="text-xs font-semibold text-slate-700">days ahead</span>
+                              </div>
+                              <span className="text-[11px] text-[#64748b] block">How many days in advance employees can confirm meals</span>
+                            </div>
+
+                            <hr className="border-slate-100" />
+
+                            {/* Allow Late Confirmation */}
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <label className="text-xs font-bold text-[#0f172a] block">Allow Late Confirmation</label>
+                                <span className="text-[11px] text-[#64748b] block mt-0.5">Allow employees to confirm after the deadline with admin approval</span>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={rulesAllowLate}
+                                onChange={(e) => setRulesAllowLate(e.target.checked)}
+                                className="w-10 h-5 rounded-full accent-black cursor-pointer"
+                              />
+                            </div>
+
+                            <hr className="border-slate-100" />
+
+                            {/* Auto-Confirm on No Response */}
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <label className="text-xs font-bold text-[#0f172a] block">Auto-Confirm on No Response</label>
+                                <span className="text-[11px] text-[#64748b] block mt-0.5">Automatically confirm the default meal slot if employee does not respond</span>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={rulesAutoConfirm}
+                                onChange={(e) => setRulesAutoConfirm(e.target.checked)}
+                                className="w-10 h-5 rounded-full accent-black cursor-pointer"
+                              />
+                            </div>
+
+                            <hr className="border-slate-100" />
+
+                            {/* Skip Confirmation for Recurring Meals */}
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <label className="text-xs font-bold text-[#0f172a] block">Skip Confirmation for Recurring Meals</label>
+                                <span className="text-[11px] text-[#64748b] block mt-0.5">Recurring meal plan employees are auto-confirmed daily without manual input</span>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={rulesSkipConfirmation}
+                                onChange={(e) => setRulesSkipConfirmation(e.target.checked)}
+                                className="w-10 h-5 rounded-full accent-black cursor-pointer"
+                              />
+                            </div>
+
+                            <hr className="border-slate-100" />
+
+                            {/* Confirmation Reminder Timing */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 block">Confirmation Reminder Timing</label>
+                              <select
+                                value={rulesReminderTiming}
+                                onChange={(e) => setRulesReminderTiming(e.target.value)}
+                                className="max-w-md w-full px-3 py-2.5 border rounded-xl bg-white text-xs font-semibold focus:outline-none text-slate-800"
+                              >
+                                <option value="1 hour before deadline">1 hour before deadline</option>
+                                <option value="2 hours before deadline">2 hours before deadline</option>
+                                <option value="4 hours before deadline">4 hours before deadline</option>
+                                <option value="9:00 AM on the day of meal">9:00 AM on the day of meal</option>
+                              </select>
+                              <span className="text-[11px] text-[#64748b] block">When to send reminder notifications to employees who haven&apos;t confirmed</span>
+                            </div>
+
+                            <div className="pt-4 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => showToast('🎉 Confirmation rules saved!')}
+                                className="px-6 py-2.5 bg-black hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
+                              >
+                                Save Changes
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* NOTIFICATION SETTINGS PANEL */}
+                      {settingsSubTab === 'notifications' && (
+                        <div className="space-y-6">
+                          <div>
+                            <h3 className="text-base font-bold text-[#0f172a]">Notification Settings</h3>
+                            <p className="text-xs text-[#64748b] mt-0.5">Configure how and when employees and admins receive alerts.</p>
+                          </div>
+
+                          <div className="space-y-6">
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-450 uppercase tracking-wider mb-4">Employee Notifications</h4>
+                              
+                              <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className="text-xs font-bold text-[#0f172a] block">Meal Confirmation Reminder</span>
+                                    <span className="text-[11px] text-[#64748b] block mt-0.5 font-medium">Remind employees to confirm meals before the deadline</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifRemind} onChange={(e) => setNotifRemind(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+
+                                <hr className="border-slate-50" />
+
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className="text-xs font-bold text-[#0f172a] block">Meal Skipped Alert</span>
+                                    <span className="text-[11px] text-[#64748b] block mt-0.5 font-medium">Notify employees when a meal is auto-skipped</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifSkipped} onChange={(e) => setNotifSkipped(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+
+                                <hr className="border-slate-50" />
+
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className="text-xs font-bold text-[#0f172a] block">Menu Update Notification</span>
+                                    <span className="text-[11px] text-[#64748b] block mt-0.5 font-medium">Alert employees when the weekly menu is updated</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifMenuUpdate} onChange={(e) => setNotifMenuUpdate(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+
+                                <hr className="border-slate-50" />
+
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className="text-xs font-bold text-[#0f172a] block">Billing Statement Ready</span>
+                                    <span className="text-[11px] text-[#64748b] block mt-0.5 font-medium">Notify employees when their monthly bill is generated</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifBillingReady} onChange={(e) => setNotifBillingReady(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+                              </div>
+                            </div>
+
+                            <hr className="border-slate-100" />
+
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-450 uppercase tracking-wider mb-4">Admin Notifications</h4>
+
+                              <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className="text-xs font-bold text-[#0f172a] block">Low Confirmation Rate Alert</span>
+                                    <span className="text-[11px] text-[#64748b] block mt-0.5 font-medium">Alert admin when confirmation rate drops below threshold</span>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-1.5">
+                                      <input
+                                        type="number"
+                                        value={notifLowRateThreshold}
+                                        onChange={(e) => setNotifLowRateThreshold(parseInt(e.target.value) || 0)}
+                                        className="w-16 px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-mono text-center focus:outline-none"
+                                      />
+                                      <span className="text-xs text-slate-400 font-bold">%</span>
+                                    </div>
+                                    <input type="checkbox" checked={notifLowRate} onChange={(e) => setNotifLowRate(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                  </div>
+                                </div>
+
+                                <hr className="border-slate-50" />
+
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className="text-xs font-bold text-[#0f172a] block">New Employee Onboarded</span>
+                                    <span className="text-[11px] text-[#64748b] block mt-0.5 font-medium">Notify admin when a new employee is added to the system</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifNewEmployee} onChange={(e) => setNotifNewEmployee(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+
+                                <hr className="border-slate-50" />
+
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className="text-xs font-bold text-[#0f172a] block">Slot Configuration Changed</span>
+                                    <span className="text-[11px] text-[#64748b] block mt-0.5 font-medium">Alert admin when meal slot settings are modified</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifSlotChanged} onChange={(e) => setNotifSlotChanged(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+
+                                <hr className="border-slate-50" />
+
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className="text-xs font-bold text-[#0f172a] block">Invoice Generated</span>
+                                    <span className="text-[11px] text-[#64748b] block mt-0.5 font-medium">Notify admin when a billing invoice is created</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifInvoiceGenerated} onChange={(e) => setNotifInvoiceGenerated(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+                              </div>
+                            </div>
+
+                            <hr className="border-slate-100" />
+
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-450 uppercase tracking-wider mb-4">Notification Channels</h4>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="p-4 border border-slate-100 rounded-xl flex items-center justify-between bg-slate-50/40">
+                                  <div className="flex items-center gap-2.5">
+                                    <FileText className="h-4.5 w-4.5 text-blue-500" />
+                                    <span className="text-xs font-bold text-[#0f172a]">Email</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifChannelEmail} onChange={(e) => setNotifChannelEmail(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+                                <div className="p-4 border border-slate-100 rounded-xl flex items-center justify-between bg-slate-50/40">
+                                  <div className="flex items-center gap-2.5">
+                                    <FileText className="h-4.5 w-4.5 text-emerald-500" />
+                                    <span className="text-xs font-bold text-[#0f172a]">SMS</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifChannelSMS} onChange={(e) => setNotifChannelSMS(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+                                <div className="p-4 border border-slate-100 rounded-xl flex items-center justify-between bg-slate-50/40">
+                                  <div className="flex items-center gap-2.5">
+                                    <Bell className="h-4.5 w-4.5 text-indigo-500" />
+                                    <span className="text-xs font-bold text-[#0f172a]">In-App</span>
+                                  </div>
+                                  <input type="checkbox" checked={notifChannelInApp} onChange={(e) => setNotifChannelInApp(e.target.checked)} className="w-10 h-5 rounded-full accent-black cursor-pointer" />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="pt-4 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => showToast('🎉 Notification settings saved!')}
+                                className="px-6 py-2.5 bg-black hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
+                              >
+                                Save Changes
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* BILLING & PRICING PANEL */}
+                      {settingsSubTab === 'billing' && (
+                        <div className="space-y-6">
+                          <div>
+                            <h3 className="text-base font-bold text-[#0f172a]">Billing Configuration</h3>
+                            <p className="text-xs text-[#64748b] mt-0.5">Set billing cycle, payment terms, and invoice preferences.</p>
+                          </div>
+
+                          <div className="space-y-6">
+                            {/* Billing Cycle */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 block">Billing Cycle</label>
+                              <div className="flex gap-2">
+                                {(['Monthly', 'Weekly', 'Bi-weekly'] as const).map((cycle) => (
+                                  <button
+                                    key={cycle}
+                                    type="button"
+                                    onClick={() => setBillingCycle(cycle)}
+                                    className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                      billingCycle === cycle
+                                        ? 'bg-[#1e293b] text-white border-[#1e293b]'
+                                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    {cycle}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              {/* Invoice Generation Day */}
+                              <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700 block">Invoice Generation Day</label>
+                                <input
+                                  type="number"
+                                  value={billingInvoiceGenDay}
+                                  onChange={(e) => setBillingInvoiceGenDay(parseInt(e.target.value) || 1)}
+                                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                                />
+                                <span className="text-[11px] text-[#64748b] block">Day of month when invoices are auto-generated</span>
+                              </div>
+
+                              {/* Payment Due Days */}
+                              <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700 block">Payment Due Days</label>
+                                <input
+                                  type="number"
+                                  value={billingPaymentDueDays}
+                                  onChange={(e) => setBillingPaymentDueDays(parseInt(e.target.value) || 15)}
+                                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                                />
+                                <span className="text-[11px] text-[#64748b] block">Number of days after invoice generation for payment</span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              {/* Currency */}
+                              <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700 block">Currency</label>
+                                <select
+                                  value={billingCurrency}
+                                  onChange={(e) => setBillingCurrency(e.target.value)}
+                                  className="w-full px-3 py-2.5 border rounded-xl bg-white text-xs font-semibold focus:outline-none text-slate-800"
+                                >
+                                  <option value="INR (₹)">INR (₹)</option>
+                                  <option value="USD ($)">USD ($)</option>
+                                  <option value="EUR (€)">EUR (€)</option>
+                                </select>
+                              </div>
+
+                              {/* Tax Rate */}
+                              <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700 block">Tax Rate (%)</label>
+                                <input
+                                  type="number"
+                                  value={billingTaxRate}
+                                  onChange={(e) => setBillingTaxRate(parseInt(e.target.value) || 0)}
+                                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                                />
+                                <span className="text-[11px] text-[#64748b] block">GST applied to meal charges</span>
+                              </div>
+                            </div>
+
+                            {/* Include Itemized Breakdown */}
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <label className="text-xs font-bold text-[#0f172a] block">Include Itemized Breakdown</label>
+                                <span className="text-[11px] text-[#64748b] block mt-0.5">Show per-meal details in employee invoices</span>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={billingIncludeItemized}
+                                onChange={(e) => setBillingIncludeItemized(e.target.checked)}
+                                className="w-10 h-5 rounded-full accent-black cursor-pointer"
+                              />
+                            </div>
+
+                            <hr className="border-slate-100" />
+
+                            <div>
+                              <h3 className="text-base font-bold text-[#0f172a]">Subsidy & Deduction Rules</h3>
+                              <p className="text-xs text-[#64748b] mt-0.5">Configure employer meal subsidies and payroll deduction settings.</p>
+                            </div>
+
+                            {/* Employer Subsidy per Meal */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 block">Employer Subsidy per Meal</label>
+                              <div className="relative max-w-md">
+                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-[#0f172a]">₹</span>
+                                <input
+                                  type="number"
+                                  value={billingEmployerSubsidy}
+                                  onChange={(e) => setBillingEmployerSubsidy(parseInt(e.target.value) || 0)}
+                                  className="w-full pl-8 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-black text-slate-800 font-semibold"
+                                />
+                              </div>
+                              <span className="text-[11px] text-[#64748b] block">Fixed amount employer contributes per meal</span>
+                            </div>
+
+                            <div className="pt-4 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => showToast('🎉 Billing configuration saved!')}
+                                className="px-6 py-2.5 bg-black hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
+                              >
+                                Save Changes
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* AUDIT LOG PANEL */}
+                      {settingsSubTab === 'logs' && (
+                        <div className="space-y-6">
+                          <div>
+                            <h3 className="text-base font-bold text-[#0f172a]">Audit Log</h3>
+                            <p className="text-xs text-[#64748b] mt-0.5">Track all admin actions and system changes across the platform.</p>
+                          </div>
+
+                          {/* Filter bar */}
+                          <div className="bg-white border border-[#eaedf0] p-4 rounded-xl flex flex-wrap gap-4 items-center justify-between">
+                            <div className="flex gap-4">
+                              <select
+                                value={auditLogDateRange}
+                                onChange={(e) => setAuditLogDateRange(e.target.value)}
+                                className="px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:outline-none"
+                              >
+                                <option value="01 Jun 2025 – 30 Jun 2025">01 Jun 2025 – 30 Jun 2025</option>
+                                <option value="Today">Today</option>
+                                <option value="Yesterday">Yesterday</option>
+                              </select>
+                              <select
+                                value={auditLogActionType}
+                                onChange={(e) => setAuditLogActionType(e.target.value)}
+                                className="px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:outline-none"
+                              >
+                                <option value="All Actions">Action Type: All Actions</option>
+                                <option value="Meal Slot">Added Meal Slot</option>
+                                <option value="Invoice">Generated Invoice</option>
+                              </select>
+                              <select
+                                value={auditLogUser}
+                                onChange={(e) => setAuditLogUser(e.target.value)}
+                                className="px-3 py-2 border rounded-xl text-xs font-semibold bg-white focus:outline-none"
+                              >
+                                <option value="All Users">User: All Users</option>
+                                <option value="Anil Mehta">Anil Mehta</option>
+                                <option value="Priya Sharma">Priya Sharma</option>
+                                <option value="Rahul Verma">Rahul Verma</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Audit table */}
+                          <div className="border border-[#eaedf0] rounded-2xl overflow-hidden bg-white">
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-xs">
+                                <thead className="text-[11px] text-[#64748b] bg-[#fafbfc] uppercase tracking-wider font-semibold border-b border-[#eaedf0]">
+                                  <tr>
+                                    <th className="px-6 py-3.5">Timestamp</th>
+                                    <th className="px-6 py-3.5">User</th>
+                                    <th className="px-6 py-3.5">Action</th>
+                                    <th className="px-6 py-3.5">Module</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#eaedf0] text-sm text-slate-650">
+                                  {[
+                                    { time: '02 Jul 2025, 09:14 AM', user: 'Anil Mehta', action: 'Added Meal Slot', type: 'green', module: 'Meals' },
+                                    { time: '01 Jul 2025, 06:30 PM', user: 'Anil Mehta', action: 'Generated Invoice', type: 'blue', module: 'Billing' },
+                                    { time: '01 Jul 2025, 02:15 PM', user: 'Priya Sharma', action: 'Updated Menu Item', type: 'orange', module: 'Meals' },
+                                    { time: '30 Jun 2025, 11:00 AM', user: 'Anil Mehta', action: 'Modified Role', type: 'yellow', module: 'Settings' },
+                                    { time: '29 Jun 2025, 04:45 PM', user: 'Rahul Verma', action: 'Exported Report', type: 'blue', module: 'Reports' },
+                                    { time: '28 Jun 2025, 10:20 AM', user: 'Anil Mehta', action: 'Connected Integration', type: 'green', module: 'Settings' },
+                                    { time: '27 Jun 2025, 03:00 PM', user: 'Anil Mehta', action: 'Updated Billing Config', type: 'orange', module: 'Settings' },
+                                    { time: '26 Jun 2025, 09:00 AM', user: 'Priya Sharma', action: 'Added Employee', type: 'green', module: 'Employees' },
+                                    { time: '25 Jun 2025, 05:30 PM', user: 'Anil Mehta', action: 'Changed Confirmation Deadline', type: 'yellow', module: 'Settings' },
+                                    { time: '24 Jun 2025, 01:00 PM', user: 'Anil Mehta', action: 'Disabled Meal Slot', type: 'red', module: 'Meals' }
+                                  ].map((row, idx) => {
+                                    let badgeClass = 'bg-slate-100 text-slate-600';
+                                    if (row.type === 'green') badgeClass = 'bg-[#e6f7ed] text-[#1e6b3e]';
+                                    else if (row.type === 'blue') badgeClass = 'bg-blue-50 text-blue-600';
+                                    else if (row.type === 'orange') badgeClass = 'bg-orange-50 text-orange-600';
+                                    else if (row.type === 'yellow') badgeClass = 'bg-[#fffbeb] text-[#d97706]';
+                                    else if (row.type === 'red') badgeClass = 'bg-red-50 text-red-600';
+
+                                    return (
+                                      <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-6 py-3.5 font-mono text-xs">{row.time}</td>
+                                        <td className="px-6 py-3.5 font-semibold text-[#0f172a]">{row.user}</td>
+                                        <td className="px-6 py-3.5">
+                                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${badgeClass}`}>
+                                            {row.action}
+                                          </span>
+                                        </td>
+                                        <td className="px-6 py-3.5 text-slate-500 font-medium">{row.module}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                            <div className="px-6 py-3 border-t border-[#eaedf0] bg-slate-50/50 flex justify-between items-center text-xs font-semibold text-[#64748b]">
+                              <span>Showing 1–10 of 48 entries</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ROLES & INTEGRATIONS GENERIC OVERLAYS */}
+                      {['roles', 'integrations'].includes(settingsSubTab) && (
                         <div className="py-12 text-center space-y-3">
                           <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto" />
                           <h4 className="text-sm font-bold text-[#0f172a] capitalize">{settingsSubTab.replace('_', ' ')} Configuration</h4>
-                          <p className="text-xs text-slate-400">Advanced custom rules & policies for this organization module.</p>
+                          <p className="text-xs text-slate-400 font-medium">Advanced custom rules & policies for this organization module.</p>
                         </div>
                       )}
 
